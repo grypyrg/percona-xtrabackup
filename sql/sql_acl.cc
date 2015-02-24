@@ -10960,8 +10960,10 @@ err:
 static void server_mpvio_info(MYSQL_PLUGIN_VIO *vio,
                               MYSQL_PLUGIN_VIO_INFO *info)
 {
+#ifndef EMBEDDED_LIBRARY
   MPVIO_EXT *mpvio= (MPVIO_EXT *) vio;
   mpvio_info(mpvio->net->vio, info);
+#endif
 }
 
 #ifndef NO_EMBEDDED_ACCESS_CHECKS

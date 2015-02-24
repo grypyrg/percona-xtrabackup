@@ -68,6 +68,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <buf0dblwr.h>
 
 #include <sstream>
+#include <mysql.h>
 
 #define G_PTR uchar*
 
@@ -85,17 +86,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "changed_page_bitmap.h"
 #include "read_filt.h"
 #include "wsrep.h"
+#include "innobackupex.h"
 
 /* TODO: replace with appropriate macros used in InnoDB 5.6 */
 #define PAGE_ZIP_MIN_SIZE_SHIFT	10
 #define DICT_TF_ZSSIZE_SHIFT	1
 #define DICT_TF_FORMAT_ZIP	1
 #define DICT_TF_FORMAT_SHIFT		5
-
-/* === File name constants === */
-#define XB_FN_SUSPENDED_AT_START "xtrabackup_suspended_1"
-#define XB_FN_SUSPENDED_AT_END "xtrabackup_suspended_2"
-#define XB_FN_LOG_COPIED "xtrabackup_log_copied"
 
 my_bool innodb_inited= 0;
 
@@ -106,13 +103,14 @@ my_bool xtrabackup_version = FALSE;
 my_bool xtrabackup_backup = FALSE;
 my_bool xtrabackup_stats = FALSE;
 my_bool xtrabackup_prepare = FALSE;
+my_bool xtrabackup_copy_back = FALSE;
+my_bool xtrabackup_move_back = FALSE;
+my_bool xtrabackup_decrypt_decompress = FALSE;
 my_bool xtrabackup_print_param = FALSE;
 
 my_bool xtrabackup_export = FALSE;
 my_bool xtrabackup_apply_log_only = FALSE;
 
-static my_bool	xtrabackup_suspend_at_start = FALSE;
-my_bool xtrabackup_suspend_at_end = FALSE;
 longlong xtrabackup_use_memory = 100*1024*1024L;
 my_bool xtrabackup_create_ib_logfile = FALSE;
 
@@ -133,7 +131,7 @@ char *xtrabackup_incremental_dir = NULL; /* for --prepare */
 
 lsn_t xtrabackup_archived_to_lsn = 0; /* for --archived-to-lsn */
 
-static char *xtrabackup_tables = NULL;
+char *xtrabackup_tables = NULL;
 
 /* List of regular expressions for filtering */
 typedef struct xb_regex_list_node_struct xb_regex_list_node_t;
@@ -145,11 +143,11 @@ static UT_LIST_BASE_NODE_T(xb_regex_list_node_t) regex_list;
 
 static xb_regmatch_t tables_regmatch[1];
 
-static char *xtrabackup_tables_file = NULL;
+char *xtrabackup_tables_file = NULL;
 static hash_table_t* tables_hash = NULL;
 
-static char *xtrabackup_databases = NULL;
-static char *xtrabackup_databases_file = NULL;
+char *xtrabackup_databases = NULL;
+char *xtrabackup_databases_file = NULL;
 static hash_table_t* databases_hash = NULL;
 
 static hash_table_t* inc_dir_tables_hash;
@@ -175,7 +173,7 @@ ibool xtrabackup_logfile_is_renamed = FALSE;
 int xtrabackup_parallel;
 
 char *xtrabackup_stream_str = NULL;
-xb_stream_fmt_t xtrabackup_stream_fmt;
+xb_stream_fmt_t xtrabackup_stream_fmt = XB_STREAM_FMT_NONE;
 ibool xtrabackup_stream = FALSE;
 
 static const char *xtrabackup_compress_alg = NULL;
@@ -289,10 +287,10 @@ ibool srv_rebuild_indexes = FALSE;
 
 static char *xtrabackup_debug_sync = NULL;
 
-static my_bool xtrabackup_compact = FALSE;
+my_bool xtrabackup_compact = FALSE;
 static my_bool xtrabackup_rebuild_indexes = FALSE;
 
-static my_bool xtrabackup_incremental_force_scan = FALSE;
+my_bool xtrabackup_incremental_force_scan = FALSE;
 
 /* The flushed lsn which is read from data files */
 lsn_t	min_flushed_lsn= 0;
@@ -311,6 +309,17 @@ my_bool xb_close_files= FALSE;
 /* Datasinks */
 ds_ctxt_t       *ds_data     = NULL;
 ds_ctxt_t       *ds_meta     = NULL;
+
+static bool	innobackupex_mode = false;
+
+static long	innobase_log_files_in_group_save;
+static char	*srv_log_group_home_dir_save;
+static longlong	innobase_log_file_size_save;
+
+/* set true if corresponding variable set as option config file or 
+command argument */
+bool xtrabackup_innodb_data_file_path_explicit = false;
+bool xtrabackup_innodb_log_file_size_explicit = false;
 
 /* String buffer used by --print-param to accumulate server options as they are
 parsed from the defaults file */
@@ -416,8 +425,6 @@ enum options_xtrabackup
   OPT_XTRA_EXPORT,
   OPT_XTRA_APPLY_LOG_ONLY,
   OPT_XTRA_PRINT_PARAM,
-  OPT_XTRA_SUSPEND_AT_START,
-  OPT_XTRA_SUSPEND_AT_END,
   OPT_XTRA_USE_MEMORY,
   OPT_XTRA_THROTTLE,
   OPT_XTRA_LOG_COPY_INTERVAL,
@@ -501,7 +508,7 @@ enum options_xtrabackup
   OPT_CORE_FILE
 };
 
-static struct my_option xb_long_options[] =
+struct my_option xb_long_options[] =
 {
   {"version", 'v', "print xtrabackup version information",
    (G_PTR *) &xtrabackup_version, (G_PTR *) &xtrabackup_version, 0, GET_BOOL,
@@ -531,21 +538,6 @@ static struct my_option xb_long_options[] =
    (G_PTR*) &xtrabackup_use_memory, (G_PTR*) &xtrabackup_use_memory,
    0, GET_LL, REQUIRED_ARG, 100*1024*1024L, 1024*1024L, LONGLONG_MAX, 0,
    1024*1024L, 0},
-
-  {"suspend-at-start", OPT_XTRA_SUSPEND_AT_START,
-   "creates a file '" XB_FN_SUSPENDED_AT_START "' and waits until the user "
-   "deletes that file after the background log copying thread is started "
-   "during backup",
-   (G_PTR*) &xtrabackup_suspend_at_start,
-   (G_PTR*) &xtrabackup_suspend_at_start, 0, GET_BOOL, NO_ARG,
-   0, 0, 0, 0, 0, 0},
-
-  {"suspend-at-end", OPT_XTRA_SUSPEND_AT_END, "creates a file '"
-   XB_FN_SUSPENDED_AT_END "' and waits until the user deletes that file at "
-   "the end of '--backup'",
-   (G_PTR*) &xtrabackup_suspend_at_end, (G_PTR*) &xtrabackup_suspend_at_end,
-   0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-
   {"throttle", OPT_XTRA_THROTTLE, "limit count of IO operations (pairs of read&write) per second to IOS values (for '--backup')",
    (G_PTR*) &xtrabackup_throttle, (G_PTR*) &xtrabackup_throttle,
    0, GET_LONG, REQUIRED_ARG, 0, 0, LONG_MAX, 0, 1, 0},
@@ -879,6 +871,8 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
   { 0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}
 };
 
+uint xb_long_options_count = array_elements(xb_long_options);
+
 #ifndef __WIN__
 static int debug_sync_resumed;
 
@@ -934,7 +928,8 @@ debug_sync_point(const char *name)
 #endif
 }
 
-static const char *xb_load_default_groups[]= { "mysqld", "xtrabackup", 0, 0 };
+static const char *xb_load_default_groups[]=
+	{ "mysqld", "xtrabackup", "client", 0, 0 };
 
 static void print_version(void)
 {
@@ -971,9 +966,10 @@ You can download full text of the license on http://www.gnu.org/licenses/gpl-2.0
 #define ADD_PRINT_PARAM_OPT(value)              \
   print_param_str << opt->name << "=" << value << "\n";
 
-static my_bool
-get_one_option(int optid, const struct my_option *opt __attribute__((unused)),
-	       char *argument)
+my_bool
+xb_get_one_option(int optid,
+		  const struct my_option *opt __attribute__((unused)),
+		  char *argument)
 {
   switch(optid) {
   case 'h':
@@ -996,6 +992,7 @@ get_one_option(int optid, const struct my_option *opt __attribute__((unused)),
   case OPT_INNODB_DATA_FILE_PATH:
 
     ADD_PRINT_PARAM_OPT(innobase_data_file_path);
+    xtrabackup_innodb_data_file_path_explicit = true;
     break;
 
   case OPT_INNODB_LOG_GROUP_HOME_DIR:
@@ -1011,6 +1008,7 @@ get_one_option(int optid, const struct my_option *opt __attribute__((unused)),
   case OPT_INNODB_LOG_FILE_SIZE:
 
     ADD_PRINT_PARAM_OPT(innobase_log_file_size);
+    xtrabackup_innodb_log_file_size_explicit = true;
     break;
 
   case OPT_INNODB_FLUSH_METHOD:
@@ -1792,7 +1790,6 @@ or "./database/name.ibd" (InnoDB 5.5-) should be skipped from backup based on
 the --tables or --tables-file options.
 
 @return TRUE if the table should be skipped. */
-static
 my_bool
 check_if_skip_table(
 /******************/
@@ -1902,6 +1899,40 @@ end:
 	return(zip_size);
 }
 
+const char*
+xb_get_copy_action(const char *dflt)
+{
+	const char *action;
+
+	if (xtrabackup_stream) {
+		if (xtrabackup_compress) {
+			if (xtrabackup_encrypt) {
+				action = "Compressing, encrypting and streaming";
+			} else {
+				action = "Compressing and streaming";
+			}
+		} else if (xtrabackup_encrypt) {
+			action = "Encrypting and streaming";
+		} else {
+			action = "Streaming";
+		}
+	} else {
+		if (xtrabackup_compress) {
+			if (xtrabackup_encrypt) {
+				action = "Compressing and encrypting";
+			} else {
+				action = "Compressing";
+			}
+		} else if (xtrabackup_encrypt) {
+			action = "Encrypting";
+		} else {
+			action = dflt;
+		}
+	}
+
+	return(action);
+}
+
 /* TODO: We may tune the behavior (e.g. by fil_aio)*/
 
 static
@@ -1979,31 +2010,11 @@ xtrabackup_copy_datafile(fil_node_t* node, uint thread_n)
 		goto error;
 	}
 
+	action = xb_get_copy_action();
+
 	if (xtrabackup_stream) {
-		if (xtrabackup_compress) {
-			if (xtrabackup_encrypt) {
-				action = "Compressing, encrypting and streaming";
-			} else {
-				action = "Compressing and streaming";
-			}
-		} else if (xtrabackup_encrypt) {
-			action = "Encrypting and streaming";
-		} else {
-			action = "Streaming";
-		}
 		msg("[%02u] %s %s\n", thread_n, action, node_path);
 	} else {
-		if (xtrabackup_compress) {
-			if (xtrabackup_encrypt) {
-				action = "Compressing and encrypting";
-			} else {
-				action = "Compressing";
-			}
-		} else if (xtrabackup_encrypt) {
-			action = "Encrypting";
-		} else {
-			action = "Copying";
-		}
 		msg("[%02u] %s %s to %s\n", thread_n, action,
 		    node_path, dstfile->path);
 	}
@@ -2503,16 +2514,9 @@ xtrabackup_init_datasinks(void)
 		ds_set_pipe(ds, ds_data);
 		ds_data = ds;
 
-		if (xtrabackup_stream_fmt != XB_STREAM_FMT_XBSTREAM ||
-		    xtrabackup_suspend_at_end ||
-		    xtrabackup_suspend_at_start) {
+		if (xtrabackup_stream_fmt != XB_STREAM_FMT_XBSTREAM) {
 
-			/* 'xbstream' allow parallel streams, but we
-			still can't stream directly to stdout when
-			xtrabackup is invoked from innobackupex
-			(i.e. with --suspend_at_and), because
-			innobackupex and xtrabackup streams would
-			interfere. Use temporary files instead. */
+			/* 'tar' does not allow parallel streams */
 			ds_meta = ds_create(xtrabackup_target_dir, DS_TYPE_TMPFILE);
 			xtrabackup_add_datasink(ds_meta);
 			ds_set_pipe(ds_meta, ds);
@@ -2729,54 +2733,6 @@ xb_data_files_close(void)
 	srv_n_file_io_threads = 4;
 
 	srv_shutdown_state = SRV_SHUTDOWN_NONE;
-}
-
-/***********************************************************************
-Prepare a sync file path. */
-static void
-xb_make_sync_file_name(
-/*===================*/
-	const char*	name,	/*!<in: sync file name */
-	char*		path)	/*!<in/out: path to the sync file */
-{
-	snprintf(path, FN_REFLEN, "%s/%s", xtrabackup_target_dir, name);
-	srv_normalize_path_for_win(path);
-}
-
-/***********************************************************************
-Create an empty file with a given path and close it.
-@return TRUE on succees, FALSE on error. */
-static ibool
-xb_create_sync_file(
-/*================*/
-	const char*	path)	/*!<in: path to the sync file */
-{
-	File	suspend_file;
-	pid_t	pid;
-	char	buffer[64];
-
-	pid = getpid();
-	snprintf(buffer, sizeof(buffer), "%u", (uint) pid);
-
-	msg("xtrabackup: Creating suspend file '%s' with pid '%u'\n",
-	    path, (uint) pid);
-
-	suspend_file = my_create(path, 0, O_WRONLY | O_EXCL | O_NOFOLLOW,
-				 MYF(MY_WME));
-
-	if (suspend_file >= 0) {
-		ibool rc;
-
-		rc = my_write(suspend_file, (uchar *) buffer, strlen(buffer),
-			      MYF(MY_WME | MY_NABP)) == 0;
-
-		my_close(suspend_file, MYF(MY_WME));
-		return(rc);
-	}
-
-	msg("xtrabackup: Error: failed to create file '%s'\n",
-	    path);
-	return(FALSE);
 }
 
 /***********************************************************************
@@ -3074,33 +3030,6 @@ xb_filters_free()
 	}
 }
 
-/***********************************************************************
-Create a specified sync file and wait until it's removed.  */
-static void
-xtrabackup_suspend(
-/*===============*/
-	const char*	sync_fn)	/*!<in: sync file name */
-{
-	char		suspend_path[FN_REFLEN];
-	ibool		success = TRUE;
-	ibool		exists = TRUE;
-	os_file_type_t	type;
-
-	xb_make_sync_file_name(sync_fn, suspend_path);
-
-	if (!xb_create_sync_file(suspend_path)) {
-		return;
-	}
-
-	while (exists && success) {
-		os_thread_sleep(200000); /*0.2 sec*/
-		success = os_file_status(suspend_path, &exists, &type);
-		/* success == FALSE if file exists, but stat() failed.
-		os_file_status() prints an error message in this case */
-		ut_a(success);
-	}
-}
-
 /*********************************************************************//**
 Creates or opens the log files and closes them.
 @return	DB_SUCCESS or error code */
@@ -3274,7 +3203,7 @@ end:
 #endif
 }
 
-static void
+void
 xtrabackup_backup_func(void)
 {
 	MY_STAT			 stat_info;
@@ -3524,6 +3453,12 @@ reread_log_header:
 
 	xtrabackup_init_datasinks();
 
+	if (innobackupex_mode) {
+		if (!ibx_select_history()) {
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	/* open the log file */
 	memset(&stat_info, 0, sizeof(MY_STAT));
 	dst_log_file = ds_open(ds_meta, XB_LOG_FILENAME, &stat_info);
@@ -3579,10 +3514,13 @@ reread_log_header:
 		exit(EXIT_FAILURE);
 	}
 
-	/* Suspend at start, for the FLUSH CHANGED_PAGE_BITMAPS call */
-	if (xtrabackup_suspend_at_start) {
-		xtrabackup_suspend(XB_FN_SUSPENDED_AT_START);
+	/* FLUSH CHANGED_PAGE_BITMAPS call */
+	if (innobackupex_mode) {
+		if (!ibx_flush_changed_page_bitmaps()) {
+			exit(EXIT_FAILURE);
+		}
 	}
+	debug_sync_point("xtrabackup_suspend_at_start");
 
 	if (xtrabackup_incremental) {
 		if (!xtrabackup_incremental_force_scan) {
@@ -3646,9 +3584,10 @@ reread_log_header:
 	}
 	}
 
-	/* suspend-at-end */
-	if (xtrabackup_suspend_at_end) {
-		xtrabackup_suspend(XB_FN_SUSPENDED_AT_END);
+	if (innobackupex_mode) {
+		if (!ibx_backup_start()) {
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	/* read the latest checkpoint lsn */
@@ -3692,17 +3631,6 @@ skip_last_cp:
 	os_event_free(log_copying_stop);
 	ds_close(dst_log_file);
 
-	/* Signal innobackupex that log copying has stopped and it may now
-	unlock tables, so we can possibly stream xtrabackup_logfile later
-	without holding the lock. */
-	if (xtrabackup_suspend_at_end) {
-		char	log_copied_sync_file[FN_REFLEN];
-		xb_make_sync_file_name(XB_FN_LOG_COPIED, log_copied_sync_file);
-		if (!xb_create_sync_file(log_copied_sync_file)) {
-			exit(EXIT_FAILURE);
-		}
-	}
-
 	if(!xtrabackup_incremental) {
 		strcpy(metadata_type, "full-backuped");
 		metadata_from_lsn = 0;
@@ -3726,6 +3654,12 @@ skip_last_cp:
 			msg("xtrabackup: error: "
 			    "xtrabackup_write_metadata() failed.\n");
 
+	}
+
+	if (innobackupex_mode) {
+		if (!ibx_backup_finish()) {
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	xtrabackup_destroy_datasinks();
@@ -4169,22 +4103,22 @@ static my_bool
 xtrabackup_init_temp_log(void)
 {
 	os_file_t	src_file = XB_FILE_UNDEFINED;
-	char	src_path[FN_REFLEN];
-	char	dst_path[FN_REFLEN];
-	ibool	success;
+	char		src_path[FN_REFLEN];
+	char		dst_path[FN_REFLEN];
+	ibool		success;
 
-	ulint	field;
-	byte	log_buf[UNIV_PAGE_SIZE_MAX * 128]; /* 2 MB */
+	ulint		field;
+	byte		log_buf[UNIV_PAGE_SIZE_MAX * 128]; /* 2 MB */
 
 	ib_int64_t	file_size;
 
-	lsn_t	max_no;
-	lsn_t	max_lsn;
-	lsn_t	checkpoint_no;
+	lsn_t		max_no;
+	lsn_t		max_lsn;
+	lsn_t		checkpoint_no;
 
-	ulint	fold;
+	ulint		fold;
 
-	bool	checkpoint_found;
+	bool		checkpoint_found;
 
 	max_no = 0;
 
@@ -4420,6 +4354,10 @@ not_consistent:
 	src_file = XB_FILE_UNDEFINED;
 
 	/* fake InnoDB */
+	innobase_log_files_in_group_save = innobase_log_files_in_group;
+	srv_log_group_home_dir_save = srv_log_group_home_dir;
+	innobase_log_file_size_save = innobase_log_file_size;
+
 	srv_log_group_home_dir = NULL;
 	innobase_log_file_size      = file_size;
 	innobase_log_files_in_group = 1;
@@ -5173,6 +5111,10 @@ xtrabackup_close_temp_log(my_bool clear_flag)
 
 	os_file_close(src_file);
 	src_file = XB_FILE_UNDEFINED;
+
+	innobase_log_files_in_group = innobase_log_files_in_group_save;
+	srv_log_group_home_dir = srv_log_group_home_dir_save;
+	innobase_log_file_size = innobase_log_file_size_save;
 
 	return(FALSE);
 error:
@@ -6097,14 +6039,46 @@ next_node:
 		}
 	}
 
-	if(!xtrabackup_create_ib_logfile)
-		return;
+	if (!ibx_apply_log_finish()) {
+		exit(EXIT_FAILURE);
+	}
 
-	/* TODO: make more smart */
+	sync_close();
+	sync_initialized = FALSE;
+	if (fil_system) {
+		fil_close();
+	}
+	os_sync_free();
+	// mem_close();
+	os_sync_mutex = NULL;
+	ut_free_all_mem();
 
-	msg("\n[notice]\n"
-	    "We cannot call InnoDB second time during the process lifetime.\n");
-	msg("Please re-execte to create ib_logfile*. Sorry.\n");
+	/* start InnoDB once again to create log files */
+
+	if (innobackupex_mode && !xtrabackup_apply_log_only) {
+
+		if(innodb_init_param()) {
+			goto error;
+		}
+
+		srv_apply_log_only = (ibool) xtrabackup_apply_log_only;
+		srv_rebuild_indexes = (ibool) xtrabackup_rebuild_indexes;
+
+		/* increase IO threads */
+		if(srv_n_file_io_threads < 10) {
+			srv_n_read_io_threads = 4;
+			srv_n_write_io_threads = 4;
+		}
+
+		srv_shutdown_state = SRV_SHUTDOWN_NONE;
+
+		if(innodb_init())
+			goto error;
+
+		if(innodb_end())
+			goto error;
+
+	}
 
 	return;
 
@@ -6159,6 +6133,8 @@ int main(int argc, char **argv)
 	MY_INIT(argv[0]);
 	xb_regex_init();
 
+	ibx_capture_tool_command(argc, argv);
+
 	system_charset_info= &my_charset_utf8_general_ci;
 	key_map_full.set_all();
 
@@ -6169,7 +6145,8 @@ int main(int argc, char **argv)
 		for (i=1; i < argc; i++) {
 			optend = strcend(argv[i], '=');
 			if (strncmp(argv[i], "--defaults-group", optend - argv[i]) == 0) {
-				xb_load_default_groups[2] = defaults_group = optend + 1;
+				xb_load_default_groups[3] = defaults_group
+							  = optend + 1;
 			}
 		}
 	}
@@ -6178,6 +6155,26 @@ int main(int argc, char **argv)
 	print_param_str <<
 		"# This MySQL options file was generated by XtraBackup.\n"
 		"[" << defaults_group << "]\n";
+
+	/* We want xtrabackup to ignore unknown options, because it only
+	recognizes a small subset of server variables */
+	my_getopt_skip_unknown = TRUE;
+
+	/* Reset u_max_value for all options, as we don't want the
+	--maximum-... modifier to set the actual option values */
+	for (my_option *optp= xb_long_options; optp->name; optp++) {
+		optp->u_max_value = (G_PTR *) &global_max_value;
+	}
+
+	if (strstr(argv[0], INNOBACKUPEX_BIN_NAME) != NULL
+	    && strcmp(strstr(argv[0], INNOBACKUPEX_BIN_NAME),
+	    				INNOBACKUPEX_BIN_NAME) == 0) {
+		/* emulate innobackupex script */
+		innobackupex_mode = true;
+		if (!ibx_handle_options(&argc, &argv)) {
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	/* Throw a descriptive error if --defaults-file is not the first command
 	line argument */
@@ -6193,17 +6190,8 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* We want xtrabackup to ignore unknown options, because it only
-	recognizes a small subset of server variables */
-	my_getopt_skip_unknown = TRUE;
-
-	/* Reset u_max_value for all options, as we don't want the
-	--maximum-... modifier to set the actual option values */
-	for (my_option *optp= xb_long_options; optp->name; optp++) {
-		optp->u_max_value = (G_PTR *) &global_max_value;
-	}
-
-	if ((ho_error=handle_options(&argc, &argv, xb_long_options, get_one_option)))
+	if ((ho_error=handle_options(&argc, &argv, xb_long_options,
+					xb_get_one_option)))
 		exit(ho_error);
 
 	/* Reject command line arguments that don't look like options, i.e. are
@@ -6216,6 +6204,12 @@ int main(int argc, char **argv)
 		    !(strlen(opt) == 2 && opt[0] == '-')) {
 
 			msg("xtrabackup: Error: unknown argument: '%s'\n", opt);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	if (innobackupex_mode) {
+		if (!ibx_init()) {
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -6337,6 +6331,9 @@ int main(int argc, char **argv)
 		if (xtrabackup_backup) num++;
 		if (xtrabackup_stats) num++;
 		if (xtrabackup_prepare) num++;
+		if (xtrabackup_copy_back) num++;
+		if (xtrabackup_move_back) num++;
+		if (xtrabackup_decrypt_decompress) num++;
 		if (num != 1) { /* !XOR (for now) */
 			usage();
 			exit(EXIT_FAILURE);
@@ -6361,7 +6358,24 @@ int main(int argc, char **argv)
 	if (xtrabackup_prepare)
 		xtrabackup_prepare_func();
 
+	if ((xtrabackup_copy_back || xtrabackup_move_back)
+	    && !ibx_copy_back()) {
+		exit(EXIT_FAILURE);
+	}
+
+	if (xtrabackup_decrypt_decompress && !ibx_decrypt_decompress()) {
+		exit(EXIT_FAILURE);
+	}
+
+	if (innobackupex_mode) {
+		ibx_cleanup();
+	}
+
 	xb_regex_end();
+
+	if (innobackupex_mode) {
+		ibx_completed_ok();
+	}
 
 	exit(EXIT_SUCCESS);
 }

@@ -21,7 +21,6 @@
 #undef EXTRA_DEBUG
 #define EXTRA_DEBUG
 
-
 /*
   Initialize memory root
 

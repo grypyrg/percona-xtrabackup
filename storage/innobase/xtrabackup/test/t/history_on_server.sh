@@ -159,7 +159,7 @@ multi_row_insert incremental_sample.test \({301..400},100\)
 
 innobackupex --history --incremental --incremental-history-uuid=$third_uuid \
 --stream=xbstream --compress --encrypt=AES256 \
-$backup_dir --encrypt-key=percona_xtrabackup_is_awesome___ > /dev/null
+--encrypt-key=percona_xtrabackup_is_awesome___ $backup_dir > /dev/null
 
 get_one_value "innodb_from_lsn"
 fourth_from_lsn=$val
@@ -178,7 +178,7 @@ get_one_value "tool_command"
 val=`set -- $val; shift 3; echo "$@"`
 expected_val="--history --incremental "\
 "--incremental-history-uuid=$third_uuid --stream=xbstream --compress "\
-"--encrypt=AES256 $backup_dir --encrypt-key=..."
+"--encrypt=AES256 --encrypt-key=... $backup_dir"
 
 if [ -z "$val" ] || [ "$val" != "$expected_val" ]
 then

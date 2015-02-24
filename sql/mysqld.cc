@@ -1829,6 +1829,7 @@ bool gtid_server_init()
 
 void clean_up(bool print_message)
 {
+#ifndef EMBEDDED_LIBRARY
   DBUG_PRINT("exit",("clean_up"));
   if (cleanup_done++)
     return; /* purecov: inspected */
@@ -1952,6 +1953,7 @@ void clean_up(bool print_message)
     killed us
   */
   DBUG_PRINT("quit", ("done with cleanup"));
+#endif
 } /* clean_up */
 
 
@@ -3699,6 +3701,7 @@ rpl_make_log_name(const char *opt,
 
 int init_common_variables()
 {
+#ifndef EMBEDDED_LIBRARY
   umask(((~my_umask) & 0666));
   connection_errors_select= 0;
   connection_errors_accept= 0;
@@ -4175,7 +4178,7 @@ You should consider changing lower_case_table_names to 1 or 2",
     sql_print_error("An error occurred while storing ignore_db_dirs to a hash.");
     return 1;
   }
-
+#endif
   return 0;
 }
 

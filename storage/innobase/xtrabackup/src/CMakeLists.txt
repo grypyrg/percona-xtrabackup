@@ -16,12 +16,14 @@
 INCLUDE(gcrypt)
 INCLUDE(curl)
 INCLUDE(libev)
+INCLUDE(mysqlclient)
 
 ADD_SUBDIRECTORY(libarchive)
 
 FIND_GCRYPT()
 FIND_CURL()
 FIND_EV()
+FIND_MYSQL()
 
 INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/include
@@ -32,6 +34,7 @@ INCLUDE_DIRECTORIES(
   ${GCRYPT_INCLUDE_DIR}
   ${CURL_INCLUDE_DIRS}
   ${LIBEV_INCLUDE_DIRS}
+  ${MYSQL_INCLUDE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
   )
 
@@ -44,6 +47,7 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
 
 MYSQL_ADD_EXECUTABLE(xtrabackup
   xtrabackup.cc
+  innobackupex.cc
   changed_page_bitmap.cc
   compact.cc
   datasink.c
@@ -69,6 +73,48 @@ SET_TARGET_PROPERTIES(xtrabackup PROPERTIES ENABLE_EXPORTS TRUE)
 
 TARGET_LINK_LIBRARIES(xtrabackup 
   mysqlserver 
+  ${MYSQL_LIBRARIES}
+  ${GCRYPT_LIBS} 
+  archive_static
+  )
+
+
+########################################################################
+# innobackupex binary
+########################################################################
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/xtrabackup_version.h )
+
+
+MYSQL_ADD_EXECUTABLE(innobackupex
+  xtrabackup.cc
+  innobackupex.cc
+  changed_page_bitmap.cc
+  compact.cc
+  datasink.c
+  ds_archive.c
+  ds_buffer.c
+  ds_compress.c
+  ds_encrypt.c
+  ds_local.c
+  ds_stdout.c
+  ds_tmpfile.c
+  ds_xbstream.c
+  fil_cur.cc
+  quicklz/quicklz.c
+  read_filt.cc
+  write_filt.cc
+  wsrep.cc
+  xbcrypt_common.c
+  xbcrypt_write.c
+  xbstream_write.c
+  )
+
+SET_TARGET_PROPERTIES(innobackupex PROPERTIES ENABLE_EXPORTS TRUE)
+
+TARGET_LINK_LIBRARIES(innobackupex 
+  mysqlserver 
+  ${MYSQL_LIBRARIES}
   ${GCRYPT_LIBS} 
   archive_static
   )

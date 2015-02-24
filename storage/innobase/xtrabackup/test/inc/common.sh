@@ -624,7 +624,7 @@ function resume_suspended_xb()
 {
     local file=$1
     echo "Removing $file"
-    rm -f $file
+    kill -SIGCONT `cat $file`
 }
 
 ########################################################################

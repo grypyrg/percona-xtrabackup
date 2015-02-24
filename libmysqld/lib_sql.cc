@@ -110,6 +110,7 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
 		     const uchar *arg, ulong arg_length, my_bool skip_check,
                      MYSQL_STMT *stmt)
 {
+#ifndef EMBEDDED_LIBRARY
   my_bool result= 1;
   THD *thd=(THD *) mysql->thd;
   NET *net= &mysql->net;
@@ -178,10 +179,14 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
 end:
   thd->restore_globals();
   return result;
+#else
+  return(FALSE);
+#endif
 }
 
 static void emb_flush_use_result(MYSQL *mysql, my_bool)
 {
+#ifndef EMBEDDED_LIBRARY
   THD *thd= (THD*) mysql->thd;
   if (thd->cur_data)
   {
@@ -194,6 +199,7 @@ static void emb_flush_use_result(MYSQL *mysql, my_bool)
     thd->first_data= data->embedded_info->next;
     free_rows(data);
   }
+#endif
 }
 
 
@@ -230,6 +236,7 @@ emb_read_rows(MYSQL *mysql, MYSQL_FIELD *mysql_fields __attribute__((unused)),
 
 static MYSQL_FIELD *emb_list_fields(MYSQL *mysql)
 {
+#ifndef EMBEDDED_LIBRARY
   MYSQL_DATA *res;
   if (emb_read_query_result(mysql))
     return 0;
@@ -239,6 +246,9 @@ static MYSQL_FIELD *emb_list_fields(MYSQL *mysql)
   my_free(res);
   mysql->status= MYSQL_STATUS_READY;
   return mysql->fields;
+#else
+  return(NULL);
+#endif
 }
 
 static my_bool emb_read_prepare_result(MYSQL *mysql, MYSQL_STMT *stmt)
@@ -288,6 +298,7 @@ static void emb_fetch_lengths(ulong *to, MYSQL_ROW column,
 
 static my_bool emb_read_query_result(MYSQL *mysql)
 {
+#ifndef EMBEDDED_LIBRARY
   THD *thd= (THD*) mysql->thd;
   MYSQL_DATA *res= thd->first_data;
   DBUG_ASSERT(!thd->cur_data);
@@ -323,7 +334,7 @@ static my_bool emb_read_query_result(MYSQL *mysql)
   }
   else
     my_free(res);
-
+#endif
   return 0;
 }
 
@@ -359,6 +370,7 @@ static int emb_stmt_execute(MYSQL_STMT *stmt)
 
 int emb_read_binary_rows(MYSQL_STMT *stmt)
 {
+#ifndef EMBEDDED_LIBRARY
   MYSQL_DATA *data;
   if (!(data= emb_read_rows(stmt->mysql, 0, 0)))
   {
@@ -368,11 +380,13 @@ int emb_read_binary_rows(MYSQL_STMT *stmt)
   stmt->result= *data;
   my_free(data);
   set_stmt_errmsg(stmt, &stmt->mysql->net);
+#endif
   return 0;
 }
 
 int emb_read_rows_from_cursor(MYSQL_STMT *stmt)
 {
+#ifndef EMBEDDED_LIBRARY
   MYSQL *mysql= stmt->mysql;
   THD *thd= (THD*) mysql->thd;
   MYSQL_DATA *res= thd->first_data;
@@ -391,10 +405,14 @@ int emb_read_rows_from_cursor(MYSQL_STMT *stmt)
   net_clear_error(&mysql->net);
 
   return emb_read_binary_rows(stmt);
+#else
+  return(0);
+#endif
 }
 
 int emb_unbuffered_fetch(MYSQL *mysql, char **row)
 {
+#ifndef EMBEDDED_LIBRARY
   THD *thd= (THD*) mysql->thd;
   MYSQL_DATA *data= thd->cur_data;
   if (data && data->embedded_info->last_errno)
@@ -418,6 +436,7 @@ int emb_unbuffered_fetch(MYSQL *mysql, char **row)
     *row= (char *)data->data->data;
     data->data= data->data->next;
   }
+#endif
   return 0;
 }
 
@@ -882,6 +901,7 @@ err:
 
 void THD::clear_data_list()
 {
+#ifndef EMBEDDED_LIBRARY
   while (first_data)
   {
     MYSQL_DATA *data= first_data;
@@ -891,6 +911,7 @@ void THD::clear_data_list()
   data_tail= &first_data;
   free_rows(cur_data);
   cur_data= 0;
+#endif
 }
 
 
@@ -1338,9 +1359,11 @@ bool Protocol::net_store_data(const uchar *from, size_t length)
 int vprint_msg_to_log(enum loglevel level __attribute__((unused)),
                        const char *format, va_list argsi)
 {
+#ifndef EMBEDDED_LIBRARY
   my_vsnprintf(mysql_server_last_error, sizeof(mysql_server_last_error),
                format, argsi);
   mysql_server_last_errno= CR_UNKNOWN_ERROR;
+#endif
   return 0;
 }
 

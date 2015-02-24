@@ -16,6 +16,16 @@
 #ifndef _my_sys_h
 #define _my_sys_h
 
+#define init_alloc_root xb_init_alloc_root
+#define alloc_root xb_alloc_init
+#define multi_alloc_root xb_multi_alloc_root
+#define free_root xb_free_root
+#define set_prealloc_root xb_set_prealloc_root
+#define reset_root_defaults xb_reset_root_defaults
+#define strdup_root xb_strdup_root
+#define strmake_root xb_strmake_root
+#define memdup_root xb_memdup_root
+
 #include "my_global.h"                  /* C_MODE_START, C_MODE_END */
 
 C_MODE_START

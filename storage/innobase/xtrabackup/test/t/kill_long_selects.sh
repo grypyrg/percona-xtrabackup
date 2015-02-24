@@ -170,6 +170,9 @@ bg_run bg_select_pid "mysql_select 200"
 bg_run bg_update_pid "mysql_update 200"
 wait_for_connection_count 2
 
+# sleep 3 seconds to qualify queries for --lock-wait-threshold=2
+sleep 3
+
 run_cmd_expect_failure ${IB_BIN} ${IB_ARGS} $topdir/full \
                           --ftwrl-wait-timeout=3 \
                           --ftwrl-wait-query-type=update \
@@ -188,6 +191,9 @@ bg_run bg_update_pid "mysql_update 5"
 wait_for_connection_count 1
 bg_run bg_select_pid "mysql_select 200"
 wait_for_connection_count 2
+
+# sleep at least --lock-wait-threshold seconds
+sleep 2
 
 innobackupex $topdir/full \
                           --ftwrl-wait-timeout=6 \

@@ -20,6 +20,54 @@
 #ifndef _m_ctype_h
 #define _m_ctype_h
 
+#define my_charset_bin xb_my_charset_bin
+#define my_charset_latin1 xb_my_charset_latin1
+#define my_charset_filename xb_my_charset_filename
+
+#define my_charset_big5_chinese_ci xb_my_charset_big5_chinese_ci
+#define my_charset_big5_bin xb_my_charset_big5_bin
+#define my_charset_cp932_japanese_ci xb_my_charset_cp932_japanese_ci
+#define my_charset_cp932_bin xb_my_charset_cp932_bin
+#define my_charset_cp1250_czech_ci xb_my_charset_cp1250_czech_ci
+#define my_charset_eucjpms_japanese_ci xb_my_charset_eucjpms_japanese_ci
+#define my_charset_eucjpms_bin xb_my_charset_eucjpms_bin
+#define my_charset_euckr_korean_ci xb_my_charset_euckr_korean_ci
+#define my_charset_euckr_bin xb_my_charset_euckr_bin
+#define my_charset_gb2312_chinese_ci xb_my_charset_gb2312_chinese_ci
+#define my_charset_gb2312_bin xb_my_charset_gb2312_bin
+#define my_charset_gbk_chinese_ci xb_my_charset_gbk_chinese_ci
+#define my_charset_gbk_bin xb_my_charset_gbk_bin
+#define my_charset_latin1_german2_ci xb_my_charset_latin1_german2_ci
+#define my_charset_latin1_bin xb_my_charset_latin1_bin
+#define my_charset_latin2_czech_ci xb_my_charset_latin2_czech_ci
+#define my_charset_sjis_japanese_ci xb_my_charset_sjis_japanese_ci
+#define my_charset_sjis_bin xb_my_charset_sjis_bin
+#define my_charset_tis620_thai_ci xb_my_charset_tis620_thai_ci
+#define my_charset_tis620_bin xb_my_charset_tis620_bin
+#define my_charset_ucs2_general_ci xb_my_charset_ucs2_general_ci
+#define my_charset_ucs2_bin xb_my_charset_ucs2_bin
+#define my_charset_ucs2_unicode_ci xb_my_charset_ucs2_unicode_ci
+#define my_charset_ucs2_general_mysql500_ci xb_my_charset_ucs2_general_mysql500_ci
+#define my_charset_ujis_japanese_ci xb_my_charset_ujis_japanese_ci
+#define my_charset_ujis_bin xb_my_charset_ujis_bin
+#define my_charset_utf16_bin xb_my_charset_utf16_bin
+#define my_charset_utf16_general_ci xb_my_charset_utf16_general_ci
+#define my_charset_utf16_unicode_ci xb_my_charset_utf16_unicode_ci
+#define my_charset_utf16le_bin xb_my_charset_utf16le_bin
+#define my_charset_utf16le_general_ci xb_my_charset_utf16le_general_ci
+#define my_charset_utf32_bin xb_my_charset_utf32_bin
+#define my_charset_utf32_general_ci xb_my_charset_utf32_general_ci
+#define my_charset_utf32_unicode_ci xb_my_charset_utf32_unicode_ci
+
+#define my_charset_utf8_general_ci xb_my_charset_utf8_general_ci
+#define my_charset_utf8_tolower_ci xb_my_charset_utf8_tolower_ci
+#define my_charset_utf8_unicode_ci xb_my_charset_utf8_unicode_ci
+#define my_charset_utf8_bin xb_my_charset_utf8_bin
+#define my_charset_utf8_general_mysql500_ci xb_my_charset_utf8_general_mysql500_ci
+#define my_charset_utf8mb4_bin xb_my_charset_utf8mb4_bin
+#define my_charset_utf8mb4_general_ci xb_my_charset_utf8mb4_general_ci
+#define my_charset_utf8mb4_unicode_ci xb_my_charset_utf8mb4_unicode_ci
+
 #include <my_attribute.h>
 #include "my_global.h"                          /* uint16, uchar */
 

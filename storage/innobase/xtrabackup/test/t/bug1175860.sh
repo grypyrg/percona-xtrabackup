@@ -4,6 +4,8 @@
 
 . inc/common.sh
 
+skip_test "No more xtrabackup_pid."
+
 start_server
 
 echo "22993" > $MYSQLD_TMPDIR/xtrabackup_pid

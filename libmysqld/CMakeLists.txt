@@ -45,14 +45,12 @@ ENDFOREACH()
 SET(SQL_EMBEDDED_SOURCES
   emb_qcache.cc
   lib_sql.cc 
-  libmysqld.c
   ${GEN_SOURCES}
   ${MYSYS_LIBWRAP_SOURCE}
-  ../client/get_password.c
+#  ../client/get_password.c
   ../libmysql/errmsg.c
-  ../libmysql/libmysql.c
-  ../sql-common/client.c
-  ../sql-common/client_plugin.c
+#  ../libmysql/libmysql.c
+#  ../sql-common/client_plugin.c
   ../sql-common/my_time.c 
   ../sql-common/my_user.c
   ../sql-common/pack.c

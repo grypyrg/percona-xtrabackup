@@ -49,11 +49,16 @@ local_init(const char *root)
 {
 	ds_ctxt_t *ctxt;
 
-	if (my_mkdir(root, 0777, MYF(0)) < 0 && my_errno != EEXIST)
+	if (strcmp("/", root) != 0)
 	{
-		my_error(EE_CANT_MKDIR, MYF(ME_BELL | ME_WAITTANG),
-			 root, my_errno);
-		return NULL;
+		/* mkdir("/") will return ENOTBLK and "/" in fact already
+		exists */
+		if (my_mkdir(root, 0777, MYF(0)) < 0 && my_errno != EEXIST)
+		{
+			my_error(EE_CANT_MKDIR, MYF(ME_BELL | ME_WAITTANG),
+				 root, my_errno);
+			return NULL;
+		}
 	}
 
 	ctxt = my_malloc(sizeof(ds_ctxt_t), MYF(MY_FAE));

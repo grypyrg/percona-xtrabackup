@@ -4,6 +4,8 @@
 
 . inc/common.sh
 
+skip_test "No more suspend files."
+
 start_server
 
 echo "" > $MYSQLD_TMPDIR/xtrabackup_suspended_1
