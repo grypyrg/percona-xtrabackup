@@ -91,7 +91,8 @@ ENDIF()
 
 
 SET(LIBS 
-  dbug strings regex mysys mysys_ssl vio 
+  dbug strings regex mysys mysys_ssl
+  # vio 
   ${ZLIB_LIBRARY} ${SSL_LIBRARIES} 
   ${LIBWRAP} ${LIBCRYPT} ${LIBDL}
   ${MYSQLD_STATIC_PLUGIN_LIBS}
