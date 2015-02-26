@@ -1009,6 +1009,7 @@ my_bool opt_ibx_safe_slave_backup = FALSE;
 my_bool opt_ibx_rsync = FALSE;
 my_bool opt_ibx_force_non_empty_dirs = FALSE;
 my_bool opt_ibx_notimestamp = FALSE;
+my_bool opt_ibx_no_backup_locks = FALSE;
 my_bool opt_ibx_decompress = FALSE;
 
 char *opt_ibx_incremental_history_name = NULL;
@@ -1098,6 +1099,7 @@ enum innobackupex_options
 	OPT_INCLUDE,
 	OPT_FORCE_NON_EMPTY_DIRS,
 	OPT_NO_TIMESTAMP,
+	OPT_NO_BACKUP_LOCKS,
 	OPT_DATABASES,
 	OPT_DECRYPT,
 	OPT_DECOMPRESS
@@ -1224,6 +1226,15 @@ static struct my_option ibx_long_options[] =
 	 "BACKUP-ROOT-DIR instead.",
 	 (uchar *) &opt_ibx_notimestamp,
 	 (uchar *) &opt_ibx_notimestamp,
+	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"no-backup-locks", OPT_NO_BACKUP_LOCKS, "This option controls if "
+	 "backup locks should be used instead of FLUSH TABLES WITH READ LOCK "
+	 "on the backup stage. The option has no effect when backup locks are "
+	 "not supported by the server. This option is enabled by default, "
+	 "disable with --no-backup-locks.",
+	 (uchar *) &opt_ibx_no_backup_locks,
+	 (uchar *) &opt_ibx_no_backup_locks,
 	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
 	{"decompress", OPT_DECOMPRESS, "Decompresses all files with the .qp "
@@ -1758,7 +1769,7 @@ get_mysql_vars(MYSQL *connection)
 	read_mysql_variables(connection, "SHOW VARIABLES",
 				mysql_vars, true);
 
-	if (have_backup_locks_var != NULL) {
+	if (have_backup_locks_var != NULL && !opt_ibx_no_backup_locks) {
 		have_backup_locks = true;
 	}
 
@@ -2228,7 +2239,7 @@ ibx_lock_binlog(MYSQL *connection)
 		ibx_mysql_query(connection, "LOCK BINLOG FOR BACKUP", false);
 		return(true);
 	}
-	return(false);
+	return(true);
 }
 
 
@@ -3406,12 +3417,12 @@ ibx_backup_start()
 		}
 	}
 
-	// The only reason why Galera/binlog info is written before
-	// wait_for_ibbackup_log_copy_finish() is that after that call the xtrabackup
-	// binary will start streamig a temporary copy of REDO log to stdout and
-	// thus, any streaming from innobackupex would interfere. The only way to
-	// avoid that is to have a single process, i.e. merge innobackupex and
-	// xtrabackup.
+	/* The only reason why Galera/binlog info is written before
+	wait_for_ibbackup_log_copy_finish() is that after that call the xtrabackup
+	binary will start streamig a temporary copy of REDO log to stdout and
+	thus, any streaming from innobackupex would interfere. The only way to
+	avoid that is to have a single process, i.e. merge innobackupex and
+	xtrabackup. */
 	if (opt_ibx_galera_info) {
 		if (!write_galera_info(mysql_connection)) {
 			return(false);

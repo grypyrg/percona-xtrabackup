@@ -34,7 +34,7 @@ EOF
 innobackupex --no-timestamp --incremental \
              --incremental-basedir=$topdir/full_backup \
              $topdir/inc_backup
-$MYSQL $MYSQL_ARGS -e "SELECT 'INNODB_CHANGED_PAGES', COUNT(*) FROM INFORMATION_SCHEMA.PLUGINS WHERE PLUGIN_NAME LIKE 'INNODB_CHANGED_PAGES'"
+
 $MYSQL $MYSQL_ARGS -Ns -e \
        "SHOW GLOBAL STATUS LIKE 'Com_%lock%'; \
        SHOW GLOBAL STATUS LIKE 'Com_flush%'" \
@@ -47,7 +47,7 @@ Com_lock_binlog_for_backup	2
 Com_show_slave_status_nolock	0
 Com_unlock_binlog	2
 Com_unlock_tables	2
-Com_flush	2
+Com_flush	3
 EOF
 
 ########################################################################
@@ -72,5 +72,5 @@ Com_lock_binlog_for_backup	2
 Com_show_slave_status_nolock	0
 Com_unlock_binlog	2
 Com_unlock_tables	3
-Com_flush	4
+Com_flush	5
 EOF
