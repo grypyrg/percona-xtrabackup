@@ -49,9 +49,6 @@ start_server_with_id $slave_id
 
 setup_slave $slave_id $master_id
 
-# produce some load on master to populate "Executed_Gtid_Set"
-run_cmd ${MYSQL} ${MYSQL_ARGS} -e "create table asdf(a int);" test
-
 switch_server $slave_id
 
 sync_slave_with_master $slave_id $master_id

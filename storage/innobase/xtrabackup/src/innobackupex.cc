@@ -41,7 +41,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdio.h>
 #include <string.h>
-#include <mysql.h>
+#include <mysql/mysql.h>
 #include <my_dir.h>
 #include <ut0mem.h>
 #include <os0sync.h>
@@ -588,7 +588,7 @@ datafile_read(datafile_cur_t *cursor)
 	if (to_read == 0) {
 		return(XB_FIL_CUR_EOF);
 	}
-fprintf(stderr, "%d - %d\n", (int)cursor->buf_offset, (int)to_read);
+
 	success = os_file_read(cursor->file, cursor->buf, cursor->buf_offset,
 			       to_read);
 	if (!success) {
@@ -988,6 +988,7 @@ static MYSQL *mysql_connection;
 /* server capabilities */
 static bool have_changed_page_bitmaps = false;
 static bool have_backup_locks = false;
+static bool have_lock_wait_timeout = false;
 static bool have_galera_enabled = false;
 static bool have_flush_engine_logs = false;
 static bool have_multi_threaded_slave = false;
@@ -1020,8 +1021,16 @@ char *opt_ibx_defaults_group = NULL;
 char *opt_ibx_socket = NULL;
 uint opt_ibx_port = 0;
 
-char *opt_ibx_lock_wait_query_type = NULL;
-char *opt_ibx_kill_long_query_type = NULL;
+const char *ibx_query_type_names[] = { "ALL", "UPDATE", "SELECT", NullS};
+
+enum ibx_query_type_t {IBX_QUERY_TYPE_ALL, IBX_QUERY_TYPE_UPDATE,
+			IBX_QUERY_TYPE_SELECT};
+
+TYPELIB ibx_query_type_typelib= {array_elements(ibx_query_type_names) - 1, "",
+	ibx_query_type_names, NULL};
+
+ibx_query_type_t opt_ibx_lock_wait_query_type;
+ibx_query_type_t opt_ibx_kill_long_query_type;
 
 ulong opt_ibx_decrypt_algo = 0;
 
@@ -1279,19 +1288,25 @@ static struct my_option ibx_long_options[] =
 	 (uchar*) &opt_ibx_incremental_history_uuid, 0, GET_STR,
 	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
-	{"lock-wait-query-type", OPT_LOCK_WAIT_QUERY_TYPE,
+	{"decrypt", OPT_DECRYPT, "Decrypts all files with the .xbcrypt "
+	 "extension in a backup previously made with --encrypt option.",
+	 &opt_ibx_decrypt_algo, &opt_ibx_decrypt_algo,
+	 &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"ftwrl-wait-query-type", OPT_LOCK_WAIT_QUERY_TYPE,
 	 "This option specifies which types of queries are allowed to complete "
 	 "before innobackupex will issue the global lock. Default is all.",
 	 (uchar*) &opt_ibx_lock_wait_query_type,
-	 (uchar*) &opt_ibx_lock_wait_query_type, 0, GET_STR,
-	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+	 (uchar*) &opt_ibx_lock_wait_query_type, &ibx_query_type_typelib,
+	 GET_ENUM, REQUIRED_ARG, IBX_QUERY_TYPE_UPDATE, 0, 0, 0, 0, 0},
 
 	{"kill-long-query-type", OPT_KILL_LONG_QUERY_TYPE,
 	 "This option specifies which types of queries should be killed to "
 	 "unblock the global lock. Default is \"all\".",
 	 (uchar*) &opt_ibx_kill_long_query_type,
-	 (uchar*) &opt_ibx_kill_long_query_type, 0, GET_STR,
-	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+	 (uchar*) &opt_ibx_kill_long_query_type, &ibx_query_type_typelib,
+	 GET_ENUM, REQUIRED_ARG, IBX_QUERY_TYPE_SELECT, 0, 0, 0, 0, 0},
 
 	{"history", OPT_HISTORY,
 	 "This option enables the tracking of backup history in the "
@@ -1333,7 +1348,7 @@ static struct my_option ibx_long_options[] =
 	 (uchar*) &opt_ibx_kill_long_queries_timeout, 0, GET_UINT,
 	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
-	{"lock-wait-timeout", OPT_LOCK_WAIT_TIMEOUT,
+	{"ftwrl-wait-timeout", OPT_LOCK_WAIT_TIMEOUT,
 	 "This option specifies time in seconds that innobackupex should wait "
 	 "for queries that would block FTWRL before running it. If there are "
 	 "still such queries when the timeout expires, innobackupex terminates "
@@ -1343,12 +1358,12 @@ static struct my_option ibx_long_options[] =
 	 (uchar*) &opt_ibx_lock_wait_timeout, 0, GET_UINT,
 	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
-	{"lock-wait-threshold", OPT_LOCK_WAIT_THRESHOLD,
+	{"ftwrl-wait-threshold", OPT_LOCK_WAIT_THRESHOLD,
 	 "This option specifies the query run time threshold which is used by "
 	 "innobackupex to detect long-running queries with a non-zero value "
-	 "of --lock-wait-timeout. FTWRL is not started until such long-running "
-	 "queries exist. This option has no effect if --lock-wait-timeout "
-	 "is 0. Default value is 60 seconds.",
+	 "of --ftwrl-wait-timeout. FTWRL is not started until such "
+	 "long-running queries exist. This option has no effect if "
+	 "--ftwrl-wait-timeout is 0. Default value is 60 seconds.",
 	 (uchar*) &opt_ibx_lock_wait_threshold,
 	 (uchar*) &opt_ibx_lock_wait_threshold, 0, GET_UINT,
 	 REQUIRED_ARG, 60, 0, 0, 0, 0, 0},
@@ -1560,7 +1575,7 @@ ibx_mysql_query(MYSQL *connection, const char *query, bool use_result,
 	ibx_msg("Executing query: %s\n", query);
 
 	if (mysql_query(connection, query)) {
-		ibx_msg("Error: failed to execute query %s: %s", query,
+		ibx_msg("Error: failed to execute query %s: %s\n", query,
 			mysql_error(connection));
 		if (die_on_error) {
 			exit(EXIT_FAILURE);
@@ -1571,7 +1586,7 @@ ibx_mysql_query(MYSQL *connection, const char *query, bool use_result,
 	/* store result set on client if there is a result */
 	if (mysql_field_count(connection) > 0) {
 		if ((mysql_result = mysql_store_result(connection)) == NULL) {
-			ibx_msg("Error: failed to fetch query result %s: %s",
+			ibx_msg("Error: failed to fetch query result %s: %s\n",
 				query, mysql_error(connection));
 			exit(EXIT_FAILURE);
 		}
@@ -1708,11 +1723,11 @@ static
 bool
 get_mysql_vars(MYSQL *connection)
 {
-	char *gtid_slave_pos = NULL;
-	char *gtid_executed = NULL;
+	char *gtid_mode_var = NULL;
 	char *version_var = NULL;
 	char *innodb_version_var = NULL;
 	char *have_backup_locks_var = NULL;
+	char *lock_wait_timeout_var= NULL;
 	char *wsrep_on_var = NULL;
 	char *slave_parallel_workers_var = NULL;
 	char *gtid_slave_pos_var = NULL;
@@ -1725,6 +1740,8 @@ get_mysql_vars(MYSQL *connection)
 
 	mysql_variable mysql_vars[] = {
 		{"have_backup_locks", &have_backup_locks_var},
+		{"lock_wait_timeout", &lock_wait_timeout_var},
+		{"gtid_mode", &gtid_mode_var},
 		{"version", &version_var},
 		{"innodb_version", &innodb_version_var},
 		{"wsrep_on", &wsrep_on_var},
@@ -1745,6 +1762,10 @@ get_mysql_vars(MYSQL *connection)
 		have_backup_locks = true;
 	}
 
+	if (lock_wait_timeout_var != NULL) {
+		have_lock_wait_timeout = true;
+	}
+
 	if (wsrep_on_var != NULL) {
 		have_galera_enabled = true;
 	}
@@ -1758,28 +1779,14 @@ get_mysql_vars(MYSQL *connection)
 		have_multi_threaded_slave = true;
 	}
 
-	if (gtid_slave_pos_var != NULL) {
-		gtid_slave_pos = strdup(gtid_slave_pos_var);
-	}
-
 	if (innodb_buffer_pool_filename_var != NULL) {
 		buffer_pool_filename = strdup(innodb_buffer_pool_filename_var);
 	}
 
-	mysql_variable status_vars[] = {
-		{"Executed_Gtid_Set", &gtid_executed},
-		{NULL, NULL}
-	};
-
-	/* execute SHOW SLAVE STATUS */
-	read_mysql_variables(connection, "SHOW SLAVE STATUS",
-				status_vars, false);
-
-	if ((gtid_executed && *gtid_executed) ||
-	    (gtid_slave_pos && *gtid_slave_pos)) {
+	if ((gtid_mode_var && strcmp(gtid_mode_var, "ON") == 0) ||
+	    (gtid_slave_pos_var && *gtid_slave_pos_var)) {
 		have_gtid_slave = true;
 	}
-	free(gtid_slave_pos);
 
 	if (!(ret = check_server_version(version_var, innodb_version_var))) {
 		goto out;
@@ -1821,7 +1828,6 @@ get_mysql_vars(MYSQL *connection)
 
 out:
 	free_mysql_variables(mysql_vars);
-	free_mysql_variables(status_vars);
 
 	return(ret);
 }
@@ -1920,7 +1926,7 @@ select_incremental_lsn_from_history(lsn_t *incremental_lsn)
 
 	mysql_free_result(mysql_result);
 
-	ibx_msg("Found and using lsn: %llu for %s %s\n", *incremental_lsn,
+	ibx_msg("Found and using lsn: " LSN_PF " for %s %s\n", *incremental_lsn,
 		opt_ibx_incremental_history_uuid ? "uuid" : "name",
 		opt_ibx_incremental_history_uuid ?
 	    		opt_ibx_incremental_history_uuid :
@@ -2019,7 +2025,7 @@ have_queries_to_wait_for(MYSQL *connection, uint threshold)
 
 	result = ibx_mysql_query(connection, "SHOW FULL PROCESSLIST", true);
 
-	all_queries = (strcasecmp(opt_ibx_lock_wait_query_type, "all") == 0);
+	all_queries = (opt_ibx_lock_wait_query_type == IBX_QUERY_TYPE_ALL);
 	while ((row = mysql_fetch_row(result)) != NULL) {
 		const char	*info		= row[7];
 		int		duration	= atoi(row[5]);
@@ -2049,7 +2055,7 @@ kill_long_queries(MYSQL *connection, uint timeout)
 
 	result = ibx_mysql_query(connection, "SHOW FULL PROCESSLIST", true);
 
-	all_queries = (strcasecmp(opt_ibx_kill_long_query_type, "all") == 0);
+	all_queries = (opt_ibx_kill_long_query_type == IBX_QUERY_TYPE_ALL);
 	while ((row = mysql_fetch_row(result)) != NULL) {
 		const char	*info		= row[7];
 		int		duration	= atoi(row[5]);
@@ -2169,6 +2175,14 @@ static
 bool
 ibx_lock_tables(MYSQL *connection)
 {
+	if (have_lock_wait_timeout) {
+		/* Set the maximum supported session value for
+		lock_wait_timeout to prevent unnecessary timeouts when the
+		global value is changed from the default */
+		ibx_mysql_query(connection,
+			"SET SESSION lock_wait_timeout=31536000", false);
+	}
+
 	if (have_backup_locks) {
 		ibx_mysql_query(connection, "LOCK TABLES FOR BACKUP", false);
 		return(true);
@@ -3827,7 +3841,7 @@ static
 os_thread_ret_t
 ibx_decrypt_decompress_thread_func(void *arg)
 {
-	bool ret;
+	bool ret = true;
 	datadir_node_t node;
 	datadir_thread_ctxt_t *ctxt = (datadir_thread_ctxt_t *)(arg);
 
