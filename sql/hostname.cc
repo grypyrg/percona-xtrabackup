@@ -411,7 +411,9 @@ int ip_to_hostname(struct sockaddr_storage *ip_storage,
                    char **hostname,
                    uint *connect_errors)
 {
-#ifndef EMBEDDED_LIBRARY
+#ifdef EMBEDDED_LIBRARY
+  DBUG_ENTER("ip_to_hostname");
+#else
   const struct sockaddr *ip= (const sockaddr *) ip_storage;
   int err_code;
   bool err_status;

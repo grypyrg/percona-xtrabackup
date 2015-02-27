@@ -176,7 +176,7 @@ char *xtrabackup_stream_str = NULL;
 xb_stream_fmt_t xtrabackup_stream_fmt = XB_STREAM_FMT_NONE;
 ibool xtrabackup_stream = FALSE;
 
-static const char *xtrabackup_compress_alg = NULL;
+const char *xtrabackup_compress_alg = NULL;
 ibool xtrabackup_compress = FALSE;
 uint xtrabackup_compress_threads;
 ulonglong xtrabackup_compress_chunk_size = 0;
@@ -288,7 +288,7 @@ ibool srv_rebuild_indexes = FALSE;
 static char *xtrabackup_debug_sync = NULL;
 
 my_bool xtrabackup_compact = FALSE;
-static my_bool xtrabackup_rebuild_indexes = FALSE;
+my_bool xtrabackup_rebuild_indexes = FALSE;
 
 my_bool xtrabackup_incremental_force_scan = FALSE;
 
@@ -819,7 +819,7 @@ Disable with --skip-innodb-doublewrite.", (G_PTR*) &innobase_use_doublewrite,
    (G_PTR*) &xtrabackup_rebuild_indexes, (G_PTR*) &xtrabackup_rebuild_indexes,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
-  {"rebuild_threads", OPT_XTRA_REBUILD_INDEXES,
+  {"rebuild_threads", OPT_XTRA_REBUILD_THREADS,
    "Use this number of threads to rebuild indexes in a compact backup. "
    "Only has effect with --prepare and --rebuild-indexes.",
    (G_PTR*) &xtrabackup_rebuild_threads, (G_PTR*) &xtrabackup_rebuild_threads,

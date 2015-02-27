@@ -1069,6 +1069,33 @@ char tool_args[2048];
 
 char *innobase_data_file_path_alloc = NULL;
 
+/* copy of proxied xtrabackup options */
+my_bool ibx_xb_close_files;
+my_bool	ibx_xtrabackup_compact;
+const char *ibx_xtrabackup_compress_alg;
+uint ibx_xtrabackup_compress_threads;
+ulonglong ibx_xtrabackup_compress_chunk_size;
+ulong ibx_xtrabackup_encrypt_algo;
+char *ibx_xtrabackup_encrypt_key;
+char *ibx_xtrabackup_encrypt_key_file;
+uint ibx_xtrabackup_encrypt_threads;
+ulonglong ibx_xtrabackup_encrypt_chunk_size;
+my_bool ibx_xtrabackup_export;
+char *ibx_xtrabackup_extra_lsndir;
+char *ibx_xtrabackup_incremental_basedir;
+char *ibx_xtrabackup_incremental_dir;
+my_bool	ibx_xtrabackup_incremental_force_scan;
+ulint ibx_xtrabackup_log_copy_interval;
+char *ibx_xtrabackup_incremental;
+int ibx_xtrabackup_parallel;
+my_bool ibx_xtrabackup_rebuild_indexes;
+ulint ibx_xtrabackup_rebuild_threads;
+char *ibx_xtrabackup_stream_str;
+char *ibx_xtrabackup_tables_file;
+long ibx_xtrabackup_throttle;
+char *ibx_opt_mysql_tmpdir;
+longlong ibx_xtrabackup_use_memory;
+
 enum innobackupex_options
 {
 	OPT_USER = 256,
@@ -1102,7 +1129,32 @@ enum innobackupex_options
 	OPT_NO_BACKUP_LOCKS,
 	OPT_DATABASES,
 	OPT_DECRYPT,
-	OPT_DECOMPRESS
+	OPT_DECOMPRESS,
+
+	/* options wich are passed directly to xtrabackup */
+	OPT_CLOSE_FILES,
+	OPT_COMPACT,
+	OPT_COMPRESS,
+	OPT_COMPRESS_THREADS,
+	OPT_COMPRESS_CHUNK_SIZE,
+	OPT_ENCRYPT,
+	OPT_ENCRYPT_KEY,
+	OPT_ENCRYPT_KEY_FILE,
+	OPT_ENCRYPT_THREADS,
+	OPT_ENCRYPT_CHUNK_SIZE,
+	OPT_EXPORT,
+	OPT_EXTRA_LSNDIR,
+	OPT_INCREMENTAL_BASEDIR,
+	OPT_INCREMENTAL_DIR,
+	OPT_INCREMENTAL_FORCE_SCAN,
+	OPT_LOG_COPY_INTERVAL,
+	OPT_PARALLEL,
+	OPT_REBUILD_INDEXES,
+	OPT_REBUILD_THREADS,
+	OPT_STREAM,
+	OPT_TABLES_FILE,
+	OPT_THROTTLE,
+	OPT_USE_MEMORY
 };
 
 ibx_mode_t ibx_mode = IBX_MODE_BACKUP;
@@ -1398,6 +1450,401 @@ static struct my_option ibx_long_options[] =
 	 &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
 
+
+	/* Following command-line options are actually handled by xtrabackup.
+	We put them here with only purpose for them to showup in
+	innobackupex --help output */
+
+	// {"close_files", OPT_CLOSE_FILES, "Do not keep files opened. This "
+	//  "option is passed directly to xtrabackup. Use at your own risk.",
+	//  (uchar*) &xb_close_files, (uchar*) &xb_close_files, 0, GET_BOOL,
+	//  NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"compact", OPT_COMPACT, "Create a compact backup with all secondary "
+	//  "index pages omitted. This option is passed directly to xtrabackup. "
+	//  "See xtrabackup documentation for details.",
+	//  (uchar*) &xtrabackup_compact, (uchar*) &xtrabackup_compact,
+	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"compress", OPT_COMPRESS, "This option instructs xtrabackup to "
+	//  "compress backup copies of InnoDB data files. It is passed directly "
+	//  "to the xtrabackup child process. Try 'xtrabackup --help' for more "
+	//  "details.", (uchar*) &xtrabackup_compress_alg,
+	//  (uchar*) &xtrabackup_compress_alg, 0,
+	//  GET_STR, OPT_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"compress-threads", OPT_COMPRESS_THREADS,
+	//  "This option specifies the number of worker threads that will be used "
+	//  "for parallel compression. It is passed directly to the xtrabackup "
+	//  "child process. Try 'xtrabackup --help' for more details.",
+	//  (uchar*) &xtrabackup_compress_threads,
+	//  (uchar*) &xtrabackup_compress_threads,
+	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	// {"compress-chunk-size", OPT_COMPRESS_CHUNK_SIZE, "Size of working "
+	//  "buffer(s) for compression threads in bytes. The default value "
+	//  "is 64K.", (uchar*) &xtrabackup_compress_chunk_size,
+	//  (uchar*) &xtrabackup_compress_chunk_size,
+	//  0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
+
+	// {"encrypt", OPT_ENCRYPT, "This option instructs xtrabackup to encrypt "
+	//  "backup copies of InnoDB data files using the algorithm specified in "
+	//  "the ENCRYPTION-ALGORITHM. It is passed directly to the xtrabackup "
+	//  "child process. Try 'xtrabackup --help' for more details.",
+	//  &xtrabackup_encrypt_algo, &xtrabackup_encrypt_algo,
+	//  &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
+	//  0, 0, 0, 0, 0, 0},
+
+	// {"encrypt-key", OPT_ENCRYPT_KEY, "This option instructs xtrabackup to "
+	//  "use the given ENCRYPTION-KEY when using the --encrypt or --decrypt "
+	//  "options. During backup it is passed directly to the xtrabackup child "
+	//  "process. Try 'xtrabackup --help' for more details.",
+	//  (uchar*) &xtrabackup_encrypt_key, (uchar*) &xtrabackup_encrypt_key, 0,
+	//  GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"encrypt-key-file", OPT_ENCRYPT_KEY_FILE, "This option instructs "
+	//  "xtrabackup to use the encryption key stored in the given "
+	//  "ENCRYPTION-KEY-FILE when using the --encrypt or --decrypt options.",
+	//  (uchar*) &xtrabackup_encrypt_key_file,
+	//  (uchar*) &xtrabackup_encrypt_key_file, 0,
+	//  GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"encrypt-threads", OPT_ENCRYPT_THREADS,
+	//  "This option specifies the number of worker threads that will be used "
+	//  "for parallel encryption. It is passed directly to the xtrabackup "
+	//  "child process. Try 'xtrabackup --help' for more details.",
+	//  (uchar*) &xtrabackup_encrypt_threads,
+	//  (uchar*) &xtrabackup_encrypt_threads,
+	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	// {"encrypt-chunk-size", OPT_ENCRYPT_CHUNK_SIZE,
+	//  "This option specifies the size of the internal working buffer for "
+	//  "each encryption thread, measured in bytes. It is passed directly to "
+	//  "the xtrabackup child process. Try 'xtrabackup --help' for more "
+	//  "details.",
+	//  (uchar*) &xtrabackup_encrypt_chunk_size,
+	//  (uchar*) &xtrabackup_encrypt_chunk_size,
+	//  0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
+
+	// {"export", OPT_EXPORT, "This option is passed directly to xtrabackup's "
+	//  "--export option. It enables exporting individual tables for import "
+	//  "into another server. See the xtrabackup documentation for details.",
+	//  (uchar*) &xtrabackup_export, (uchar*) &xtrabackup_export,
+	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"extra-lsndir", OPT_EXTRA_LSNDIR, "This option specifies the "
+	//  "directory in which to save an extra copy of the "
+	//  "\"xtrabackup_checkpoints\" file. The option accepts a string "
+	//  "argument. It is passed directly to xtrabackup's --extra-lsndir "
+	//  "option. See the xtrabackup documentation for details.",
+	//  (uchar*) &xtrabackup_extra_lsndir, (uchar*) &xtrabackup_extra_lsndir,
+	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"incremental-basedir", OPT_INCREMENTAL_BASEDIR, "This option "
+	//  "specifies the directory containing the full backup that is the base "
+	//  "dataset for the incremental backup.  The option accepts a string "
+	//  "argument. It is used with the --incremental option.",
+	//  (uchar*) &xtrabackup_incremental_basedir,
+	//  (uchar*) &xtrabackup_incremental_basedir,
+	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"incremental-dir", OPT_INCREMENTAL_DIR, "This option specifies the "
+	//  "directory where the incremental backup will be combined with the "
+	//  "full backup to make a new full backup.  The option accepts a string "
+	//  "argument. It is used with the --incremental option.",
+	//  (uchar*) &xtrabackup_incremental_dir,
+	//  (uchar*) &xtrabackup_incremental_dir,
+	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"incremental-force-scan", OPT_INCREMENTAL_FORCE_SCAN,
+	//  "This options tells xtrabackup to perform full scan of data files "
+	//  "for taking an incremental backup even if full changed page bitmap "
+	//  "data is available to enable the backup without the full scan.",
+	//  (uchar*)&xtrabackup_incremental_force_scan,
+	//  (uchar*)&xtrabackup_incremental_force_scan, 0, GET_BOOL, NO_ARG,
+	//  0, 0, 0, 0, 0, 0},
+
+	// {"log-copy-interval", OPT_LOG_COPY_INTERVAL, "This option specifies "
+	//  "time interval between checks done by log copying thread in "
+	//  "milliseconds.", (uchar*) &xtrabackup_log_copy_interval,
+	//  (uchar*) &xtrabackup_log_copy_interval,
+	//  0, GET_LONG, REQUIRED_ARG, 1000, 0, LONG_MAX, 0, 1, 0},
+
+	// {"incremental-lsn", OPT_INCREMENTAL, "This option specifies the log "
+	//  "sequence number (LSN) to use for the incremental backup.  The option "
+	//  "accepts a string argument. It is used with the --incremental option. "
+	//  "It is used instead of specifying --incremental-basedir. For "
+	//  "databases created by MySQL and Percona Server 5.0-series versions, "
+	//  "specify the LSN as two 32-bit integers in high:low format. For "
+	//  "databases created in 5.1 and later, specify the LSN as a single "
+	//  "64-bit integer.",
+	//  (uchar*) &xtrabackup_incremental, (uchar*) &xtrabackup_incremental,
+	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"parallel", OPT_PARALLEL, "On backup, this option specifies the "
+	//  "number of threads the xtrabackup child process should use to back "
+	//  "up files concurrently.  The option accepts an integer argument. It "
+	//  "is passed directly to xtrabackup's --parallel option. See the "
+	//  "xtrabackup documentation for details.",
+	//  (uchar*) &xtrabackup_parallel, (uchar*) &xtrabackup_parallel, 0,
+	//  GET_INT, REQUIRED_ARG, 1, 1, INT_MAX, 0, 0, 0},
+
+	// {"rebuild-indexes", OPT_REBUILD_INDEXES,
+	//  "This option only has effect when used together with the --apply-log "
+	//  "option and is passed directly to xtrabackup. When used, makes "
+	//  "xtrabackup rebuild all secondary indexes after applying the log. "
+	//  "This option is normally used to prepare compact backups. See the "
+	//  "XtraBackup manual for more information.",
+	//  (uchar*) &xtrabackup_rebuild_indexes,
+	//  (uchar*) &xtrabackup_rebuild_indexes,
+	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"rebuild-threads", OPT_REBUILD_THREADS,
+	//  "Use this number of threads to rebuild indexes in a compact backup. "
+	//  "Only has effect with --prepare and --rebuild-indexes.",
+	//  (uchar*) &xtrabackup_rebuild_threads,
+	//  (uchar*) &xtrabackup_rebuild_threads,
+	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	// {"stream", OPT_STREAM, "This option specifies the format in which to "
+	//  "do the streamed backup.  The option accepts a string argument. The "
+	//  "backup will be done to STDOUT in the specified format. Currently, "
+	//  "the only supported formats are tar and xbstream. This option is "
+	//  "passed directly to xtrabackup's --stream option.",
+	//  (uchar*) &xtrabackup_stream_str,
+	//  (uchar*) &xtrabackup_stream_str, 0, GET_STR,
+	//  REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"tables-file", OPT_TABLES_FILE, "This option specifies the file in "
+	//  "which there are a list of names of the form database.  The option "
+	//  "accepts a string argument.table, one per line. The option is passed "
+	//  "directly to xtrabackup's --tables-file option.",
+	//  (uchar*) &xtrabackup_tables_file, (uchar*) &xtrabackup_tables_file,
+	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	// {"throttle", OPT_THROTTLE, "This option specifies a number of I/O "
+	//  "operations (pairs of read+write) per second.  It accepts an integer "
+	//  "argument.  It is passed directly to xtrabackup's --throttle option.",
+	//  (uchar*) &xtrabackup_throttle, (uchar*) &xtrabackup_throttle,
+	//  0, GET_LONG, REQUIRED_ARG, 0, 0, LONG_MAX, 0, 1, 0},
+
+	// {"tmpdir", 't', "This option specifies the location where a temporary "
+	//  "files will be stored. If the option is not specified, the default is "
+	//  "to use the value of tmpdir read from the server configuration.",
+	//  (uchar*) &opt_mysql_tmpdir,
+	//  (uchar*) &opt_mysql_tmpdir, 0, GET_STR, REQUIRED_ARG,
+	//  0, 0, 0, 0, 0, 0},
+
+	// {"use-memory", OPT_USE_MEMORY, "This option accepts a string argument "
+	//  "that specifies the amount of memory in bytes for xtrabackup to use "
+	//  "for crash recovery while preparing a backup. Multiples are supported "
+	//  "providing the unit (e.g. 1MB, 1GB). It is used only with the option "
+	//  "--apply-log. It is passed directly to xtrabackup's --use-memory "
+	//  "option. See the xtrabackup documentation for details.",
+	//  (uchar*) &xtrabackup_use_memory, (uchar*) &xtrabackup_use_memory,
+	//  0, GET_LL, REQUIRED_ARG, 100*1024*1024L, 1024*1024L, LONGLONG_MAX, 0,
+	//  1024*1024L, 0},
+
+
+	/* Following command-line options are actually handled by xtrabackup.
+	We put them here with only purpose for them to showup in
+	innobackupex --help output */
+
+	{"close_files", OPT_CLOSE_FILES, "Do not keep files opened. This "
+	 "option is passed directly to xtrabackup. Use at your own risk.",
+	 (uchar*) &ibx_xb_close_files, (uchar*) &ibx_xb_close_files, 0,
+	 GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"compact", OPT_COMPACT, "Create a compact backup with all secondary "
+	 "index pages omitted. This option is passed directly to xtrabackup. "
+	 "See xtrabackup documentation for details.",
+	 (uchar*) &ibx_xtrabackup_compact, (uchar*) &ibx_xtrabackup_compact,
+	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"compress", OPT_COMPRESS, "This option instructs xtrabackup to "
+	 "compress backup copies of InnoDB data files. It is passed directly "
+	 "to the xtrabackup child process. Try 'xtrabackup --help' for more "
+	 "details.", (uchar*) &ibx_xtrabackup_compress_alg,
+	 (uchar*) &ibx_xtrabackup_compress_alg, 0,
+	 GET_STR, OPT_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"compress-threads", OPT_COMPRESS_THREADS,
+	 "This option specifies the number of worker threads that will be used "
+	 "for parallel compression. It is passed directly to the xtrabackup "
+	 "child process. Try 'xtrabackup --help' for more details.",
+	 (uchar*) &ibx_xtrabackup_compress_threads,
+	 (uchar*) &ibx_xtrabackup_compress_threads,
+	 0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	{"compress-chunk-size", OPT_COMPRESS_CHUNK_SIZE, "Size of working "
+	 "buffer(s) for compression threads in bytes. The default value "
+	 "is 64K.", (uchar*) &ibx_xtrabackup_compress_chunk_size,
+	 (uchar*) &ibx_xtrabackup_compress_chunk_size,
+	 0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
+
+	{"encrypt", OPT_ENCRYPT, "This option instructs xtrabackup to encrypt "
+	 "backup copies of InnoDB data files using the algorithm specified in "
+	 "the ENCRYPTION-ALGORITHM. It is passed directly to the xtrabackup "
+	 "child process. Try 'xtrabackup --help' for more details.",
+	 &ibx_xtrabackup_encrypt_algo, &ibx_xtrabackup_encrypt_algo,
+	 &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"encrypt-key", OPT_ENCRYPT_KEY, "This option instructs xtrabackup to "
+	 "use the given ENCRYPTION-KEY when using the --encrypt or --decrypt "
+	 "options. During backup it is passed directly to the xtrabackup child "
+	 "process. Try 'xtrabackup --help' for more details.",
+	 (uchar*) &ibx_xtrabackup_encrypt_key,
+	 (uchar*) &ibx_xtrabackup_encrypt_key, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"encrypt-key-file", OPT_ENCRYPT_KEY_FILE, "This option instructs "
+	 "xtrabackup to use the encryption key stored in the given "
+	 "ENCRYPTION-KEY-FILE when using the --encrypt or --decrypt options.",
+	 (uchar*) &ibx_xtrabackup_encrypt_key_file,
+	 (uchar*) &ibx_xtrabackup_encrypt_key_file, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"encrypt-threads", OPT_ENCRYPT_THREADS,
+	 "This option specifies the number of worker threads that will be used "
+	 "for parallel encryption. It is passed directly to the xtrabackup "
+	 "child process. Try 'xtrabackup --help' for more details.",
+	 (uchar*) &ibx_xtrabackup_encrypt_threads,
+	 (uchar*) &ibx_xtrabackup_encrypt_threads,
+	 0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	{"encrypt-chunk-size", OPT_ENCRYPT_CHUNK_SIZE,
+	 "This option specifies the size of the internal working buffer for "
+	 "each encryption thread, measured in bytes. It is passed directly to "
+	 "the xtrabackup child process. Try 'xtrabackup --help' for more "
+	 "details.",
+	 (uchar*) &ibx_xtrabackup_encrypt_chunk_size,
+	 (uchar*) &ibx_xtrabackup_encrypt_chunk_size,
+	 0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
+
+	{"export", OPT_EXPORT, "This option is passed directly to xtrabackup's "
+	 "--export option. It enables exporting individual tables for import "
+	 "into another server. See the xtrabackup documentation for details.",
+	 (uchar*) &ibx_xtrabackup_export, (uchar*) &ibx_xtrabackup_export,
+	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"extra-lsndir", OPT_EXTRA_LSNDIR, "This option specifies the "
+	 "directory in which to save an extra copy of the "
+	 "\"xtrabackup_checkpoints\" file. The option accepts a string "
+	 "argument. It is passed directly to xtrabackup's --extra-lsndir "
+	 "option. See the xtrabackup documentation for details.",
+	 (uchar*) &ibx_xtrabackup_extra_lsndir,
+	 (uchar*) &ibx_xtrabackup_extra_lsndir,
+	 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"incremental-basedir", OPT_INCREMENTAL_BASEDIR, "This option "
+	 "specifies the directory containing the full backup that is the base "
+	 "dataset for the incremental backup.  The option accepts a string "
+	 "argument. It is used with the --incremental option.",
+	 (uchar*) &ibx_xtrabackup_incremental_basedir,
+	 (uchar*) &ibx_xtrabackup_incremental_basedir,
+	 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"incremental-dir", OPT_INCREMENTAL_DIR, "This option specifies the "
+	 "directory where the incremental backup will be combined with the "
+	 "full backup to make a new full backup.  The option accepts a string "
+	 "argument. It is used with the --incremental option.",
+	 (uchar*) &ibx_xtrabackup_incremental_dir,
+	 (uchar*) &ibx_xtrabackup_incremental_dir,
+	 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"incremental-force-scan", OPT_INCREMENTAL_FORCE_SCAN,
+	 "This options tells xtrabackup to perform full scan of data files "
+	 "for taking an incremental backup even if full changed page bitmap "
+	 "data is available to enable the backup without the full scan.",
+	 (uchar*)&ibx_xtrabackup_incremental_force_scan,
+	 (uchar*)&ibx_xtrabackup_incremental_force_scan, 0, GET_BOOL, NO_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"log-copy-interval", OPT_LOG_COPY_INTERVAL, "This option specifies "
+	 "time interval between checks done by log copying thread in "
+	 "milliseconds.", (uchar*) &ibx_xtrabackup_log_copy_interval,
+	 (uchar*) &ibx_xtrabackup_log_copy_interval,
+	 0, GET_LONG, REQUIRED_ARG, 1000, 0, LONG_MAX, 0, 1, 0},
+
+	{"incremental-lsn", OPT_INCREMENTAL, "This option specifies the log "
+	 "sequence number (LSN) to use for the incremental backup.  The option "
+	 "accepts a string argument. It is used with the --incremental option. "
+	 "It is used instead of specifying --incremental-basedir. For "
+	 "databases created by MySQL and Percona Server 5.0-series versions, "
+	 "specify the LSN as two 32-bit integers in high:low format. For "
+	 "databases created in 5.1 and later, specify the LSN as a single "
+	 "64-bit integer.",
+	 (uchar*) &ibx_xtrabackup_incremental,
+	 (uchar*) &ibx_xtrabackup_incremental,
+	 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"parallel", OPT_PARALLEL, "On backup, this option specifies the "
+	 "number of threads the xtrabackup child process should use to back "
+	 "up files concurrently.  The option accepts an integer argument. It "
+	 "is passed directly to xtrabackup's --parallel option. See the "
+	 "xtrabackup documentation for details.",
+	 (uchar*) &ibx_xtrabackup_parallel, (uchar*) &ibx_xtrabackup_parallel,
+	 0, GET_INT, REQUIRED_ARG, 1, 1, INT_MAX, 0, 0, 0},
+
+	{"rebuild-indexes", OPT_REBUILD_INDEXES,
+	 "This option only has effect when used together with the --apply-log "
+	 "option and is passed directly to xtrabackup. When used, makes "
+	 "xtrabackup rebuild all secondary indexes after applying the log. "
+	 "This option is normally used to prepare compact backups. See the "
+	 "XtraBackup manual for more information.",
+	 (uchar*) &ibx_xtrabackup_rebuild_indexes,
+	 (uchar*) &ibx_xtrabackup_rebuild_indexes,
+	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"rebuild-threads", OPT_REBUILD_THREADS,
+	 "Use this number of threads to rebuild indexes in a compact backup. "
+	 "Only has effect with --prepare and --rebuild-indexes.",
+	 (uchar*) &ibx_xtrabackup_rebuild_threads,
+	 (uchar*) &ibx_xtrabackup_rebuild_threads,
+	 0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
+
+	{"stream", OPT_STREAM, "This option specifies the format in which to "
+	 "do the streamed backup.  The option accepts a string argument. The "
+	 "backup will be done to STDOUT in the specified format. Currently, "
+	 "the only supported formats are tar and xbstream. This option is "
+	 "passed directly to xtrabackup's --stream option.",
+	 (uchar*) &ibx_xtrabackup_stream_str,
+	 (uchar*) &ibx_xtrabackup_stream_str, 0, GET_STR,
+	 REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"tables-file", OPT_TABLES_FILE, "This option specifies the file in "
+	 "which there are a list of names of the form database.  The option "
+	 "accepts a string argument.table, one per line. The option is passed "
+	 "directly to xtrabackup's --tables-file option.",
+	 (uchar*) &ibx_xtrabackup_tables_file,
+	 (uchar*) &ibx_xtrabackup_tables_file,
+	 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"throttle", OPT_THROTTLE, "This option specifies a number of I/O "
+	 "operations (pairs of read+write) per second.  It accepts an integer "
+	 "argument.  It is passed directly to xtrabackup's --throttle option.",
+	 (uchar*) &ibx_xtrabackup_throttle, (uchar*) &ibx_xtrabackup_throttle,
+	 0, GET_LONG, REQUIRED_ARG, 0, 0, LONG_MAX, 0, 1, 0},
+
+	{"tmpdir", 't', "This option specifies the location where a temporary "
+	 "files will be stored. If the option is not specified, the default is "
+	 "to use the value of tmpdir read from the server configuration.",
+	 (uchar*) &ibx_opt_mysql_tmpdir,
+	 (uchar*) &ibx_opt_mysql_tmpdir, 0, GET_STR, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"use-memory", OPT_USE_MEMORY, "This option accepts a string argument "
+	 "that specifies the amount of memory in bytes for xtrabackup to use "
+	 "for crash recovery while preparing a backup. Multiples are supported "
+	 "providing the unit (e.g. 1MB, 1GB). It is used only with the option "
+	 "--apply-log. It is passed directly to xtrabackup's --use-memory "
+	 "option. See the xtrabackup documentation for details.",
+	 (uchar*) &ibx_xtrabackup_use_memory,
+	 (uchar*) &ibx_xtrabackup_use_memory,
+	 0, GET_LL, REQUIRED_ARG, 100*1024*1024L, 1024*1024L, LONGLONG_MAX, 0,
+	 1024*1024L, 0},
+
 	{ 0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}
 };
 
@@ -1537,6 +1984,36 @@ ibx_get_one_option(int optid,
 			return(1);
 		}
 		opt_ibx_decrypt = true;
+		break;
+	case OPT_STREAM:
+		if (!strcasecmp(argument, "tar"))
+			xtrabackup_stream_fmt = XB_STREAM_FMT_TAR;
+		else if (!strcasecmp(argument, "xbstream"))
+			xtrabackup_stream_fmt = XB_STREAM_FMT_XBSTREAM;
+		else {
+			ibx_msg("Invalid --stream argument: %s\n", argument);
+			return 1;
+		}
+		xtrabackup_stream = TRUE;
+		break;
+	case OPT_COMPRESS:
+		if (argument == NULL)
+			xtrabackup_compress_alg = "quicklz";
+		else if (strcasecmp(argument, "quicklz"))
+		{
+			ibx_msg("Invalid --compress argument: %s\n", argument);
+			return 1;
+		}
+		xtrabackup_compress = TRUE;
+		break;
+	case OPT_ENCRYPT:
+		if (argument == NULL)
+		{
+			msg("Missing --encrypt argument, must specify a "
+				"valid encryption algorithm.\n");
+			return 1;
+		}
+		xtrabackup_encrypt = TRUE;
 		break;
 	}
 	return(0);
@@ -3200,6 +3677,35 @@ ibx_init()
 	const char *run;
 	const char *mixed_options[4] = {NULL, NULL, NULL, NULL};
 	int n_mixed_options;
+
+	/* setup xtrabackup options */
+	xb_close_files = ibx_xb_close_files;
+	xtrabackup_compact = ibx_xtrabackup_compact;
+	xtrabackup_compress_alg = ibx_xtrabackup_compress_alg;
+	xtrabackup_compress_threads = ibx_xtrabackup_compress_threads;
+	xtrabackup_compress_chunk_size = ibx_xtrabackup_compress_chunk_size;
+	xtrabackup_encrypt_algo = ibx_xtrabackup_encrypt_algo;
+	xtrabackup_encrypt_key = ibx_xtrabackup_encrypt_key;
+	xtrabackup_encrypt_key_file = ibx_xtrabackup_encrypt_key_file;
+	xtrabackup_encrypt_threads = ibx_xtrabackup_encrypt_threads;
+	xtrabackup_encrypt_chunk_size = ibx_xtrabackup_encrypt_chunk_size;
+	xtrabackup_export = ibx_xtrabackup_export;
+	xtrabackup_extra_lsndir = ibx_xtrabackup_extra_lsndir;
+	xtrabackup_incremental_basedir = ibx_xtrabackup_incremental_basedir;
+	xtrabackup_incremental_dir = ibx_xtrabackup_incremental_dir;
+	xtrabackup_incremental_force_scan =
+					ibx_xtrabackup_incremental_force_scan;
+	xtrabackup_log_copy_interval = ibx_xtrabackup_log_copy_interval;
+	xtrabackup_incremental = ibx_xtrabackup_incremental;
+	xtrabackup_parallel = ibx_xtrabackup_parallel;
+	xtrabackup_rebuild_indexes = ibx_xtrabackup_rebuild_indexes;
+	xtrabackup_rebuild_threads = ibx_xtrabackup_rebuild_threads;
+	xtrabackup_stream_str = ibx_xtrabackup_stream_str;
+	xtrabackup_tables_file = ibx_xtrabackup_tables_file;
+	xtrabackup_throttle = ibx_xtrabackup_throttle;
+	opt_mysql_tmpdir = ibx_opt_mysql_tmpdir;
+	xtrabackup_use_memory = ibx_xtrabackup_use_memory;
+
 
 	/* sanity checks */
 	if (!opt_ibx_incremental

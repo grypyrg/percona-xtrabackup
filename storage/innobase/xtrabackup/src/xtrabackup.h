@@ -76,6 +76,7 @@ extern lsn_t		metadata_to_lsn;
 extern lsn_t		metadata_last_lsn;
 
 extern xb_stream_fmt_t	xtrabackup_stream_fmt;
+extern ibool		xtrabackup_stream;
 
 extern char		*xtrabackup_tables;
 extern char		*xtrabackup_tables_file;
@@ -100,13 +101,30 @@ extern char		*xtrabackup_encrypt_key_file;
 extern longlong		innobase_log_file_size;
 extern long		innobase_log_files_in_group;
 
-extern const char *xtrabackup_encrypt_algo_names[];
-extern TYPELIB xtrabackup_encrypt_algo_typelib;
+extern const char	*xtrabackup_encrypt_algo_names[];
+extern TYPELIB		xtrabackup_encrypt_algo_typelib;
 
-extern bool xtrabackup_innodb_data_file_path_explicit;
-extern bool xtrabackup_innodb_log_file_size_explicit;
+extern bool		xtrabackup_innodb_data_file_path_explicit;
+extern bool		xtrabackup_innodb_log_file_size_explicit;
 
-extern int xtrabackup_parallel;
+extern int		xtrabackup_parallel;
+
+extern my_bool		xb_close_files;
+extern const char	*xtrabackup_compress_alg;
+extern uint		xtrabackup_compress_threads;
+extern ulonglong	xtrabackup_compress_chunk_size;
+extern ulong		xtrabackup_encrypt_algo;
+extern uint		xtrabackup_encrypt_threads;
+extern ulonglong	xtrabackup_encrypt_chunk_size;
+extern my_bool		xtrabackup_export;
+extern char		*xtrabackup_incremental_basedir;
+extern char		*xtrabackup_extra_lsndir;
+extern char		*xtrabackup_incremental_dir;
+extern ulint		xtrabackup_log_copy_interval;
+extern my_bool		xtrabackup_rebuild_indexes;
+extern char		*xtrabackup_stream_str;
+extern long		xtrabackup_throttle;
+extern longlong		xtrabackup_use_memory;
 
 void xtrabackup_io_throttling(void);
 my_bool xb_write_delta_metadata(const char *filename,
