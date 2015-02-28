@@ -265,6 +265,9 @@ extern uint    my_large_page_size;
 #endif
 
 /* charsets */
+#define default_charset_info xb_default_charset_info
+#define all_charsets xb_all_charsets
+#define compiled_charsets xb_compiled_charsets
 #define MY_ALL_CHARSETS_SIZE 2048
 extern MYSQL_PLUGIN_IMPORT CHARSET_INFO *default_charset_info;
 extern MYSQL_PLUGIN_IMPORT CHARSET_INFO *all_charsets[MY_ALL_CHARSETS_SIZE];

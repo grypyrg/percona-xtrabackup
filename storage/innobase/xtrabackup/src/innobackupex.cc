@@ -68,9 +68,125 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using std::min;
 using std::max;
 
+/* list of files to sync for --rsync mode */
 std::set<std::string> rsync_list;
 
-extern bool ibx_partial_backup;
+/** connection to mysql server */
+static MYSQL *mysql_connection;
+
+/* server capabilities */
+static bool have_changed_page_bitmaps = false;
+static bool have_backup_locks = false;
+static bool have_lock_wait_timeout = false;
+static bool have_galera_enabled = false;
+static bool have_flush_engine_logs = false;
+static bool have_multi_threaded_slave = false;
+static bool have_gtid_slave = false;
+
+/* options */
+my_bool opt_ibx_version = FALSE;
+my_bool opt_ibx_help = FALSE;
+my_bool opt_ibx_apply_log = FALSE;
+my_bool opt_ibx_copy_back = FALSE;
+my_bool opt_ibx_move_back = FALSE;
+my_bool opt_ibx_redo_only = FALSE;
+my_bool opt_ibx_galera_info = FALSE;
+my_bool opt_ibx_slave_info = FALSE;
+my_bool opt_ibx_incremental = FALSE;
+my_bool opt_ibx_no_lock = FALSE;
+my_bool opt_ibx_safe_slave_backup = FALSE;
+my_bool opt_ibx_rsync = FALSE;
+my_bool opt_ibx_force_non_empty_dirs = FALSE;
+my_bool opt_ibx_notimestamp = FALSE;
+my_bool opt_ibx_no_backup_locks = FALSE;
+my_bool opt_ibx_decompress = FALSE;
+
+char *opt_ibx_incremental_history_name = NULL;
+char *opt_ibx_incremental_history_uuid = NULL;
+
+char *opt_ibx_user = NULL;
+char *opt_ibx_password = NULL;
+char *opt_ibx_host = NULL;
+char *opt_ibx_defaults_group = NULL;
+char *opt_ibx_socket = NULL;
+uint opt_ibx_port = 0;
+
+const char *ibx_query_type_names[] = { "ALL", "UPDATE", "SELECT", NullS};
+
+enum ibx_query_type_t {IBX_QUERY_TYPE_ALL, IBX_QUERY_TYPE_UPDATE,
+			IBX_QUERY_TYPE_SELECT};
+
+TYPELIB ibx_query_type_typelib= {array_elements(ibx_query_type_names) - 1, "",
+	ibx_query_type_names, NULL};
+
+ulong opt_ibx_lock_wait_query_type;
+ulong opt_ibx_kill_long_query_type;
+
+ulong opt_ibx_decrypt_algo = 0;
+
+uint opt_ibx_kill_long_queries_timeout = 0;
+uint opt_ibx_lock_wait_timeout = 0;
+uint opt_ibx_lock_wait_threshold = 0;
+uint opt_ibx_debug_sleep_before_unlock = 0;
+uint opt_ibx_safe_slave_backup_timeout = 0;
+
+const char *opt_ibx_history = NULL;
+char *opt_ibx_include = NULL;
+char *opt_ibx_databases = NULL;
+bool ibx_partial_backup = false;
+bool opt_ibx_decrypt = false;
+
+char *ibx_position_arg = NULL;
+char *ibx_backup_directory = NULL;
+
+/* Kill long selects */
+os_thread_id_t	kill_query_thread_id;
+os_event_t	kill_query_thread_started;
+os_event_t	kill_query_thread_stopped;
+os_event_t	kill_query_thread_stop;
+
+bool sql_thread_started = false;
+char *mysql_slave_position = NULL;
+char *mysql_binlog_position = NULL;
+char *buffer_pool_filename = NULL;
+
+/* History on server */
+time_t history_start_time;
+time_t history_end_time;
+time_t history_lock_time;
+
+char *tool_name;
+char tool_args[2048];
+
+char *innobase_data_file_path_alloc = NULL;
+
+/* copy of proxied xtrabackup options */
+my_bool ibx_xb_close_files;
+my_bool	ibx_xtrabackup_compact;
+const char *ibx_xtrabackup_compress_alg;
+uint ibx_xtrabackup_compress_threads;
+ulonglong ibx_xtrabackup_compress_chunk_size;
+ulong ibx_xtrabackup_encrypt_algo;
+char *ibx_xtrabackup_encrypt_key;
+char *ibx_xtrabackup_encrypt_key_file;
+uint ibx_xtrabackup_encrypt_threads;
+ulonglong ibx_xtrabackup_encrypt_chunk_size;
+my_bool ibx_xtrabackup_export;
+char *ibx_xtrabackup_extra_lsndir;
+char *ibx_xtrabackup_incremental_basedir;
+char *ibx_xtrabackup_incremental_dir;
+my_bool	ibx_xtrabackup_incremental_force_scan;
+ulint ibx_xtrabackup_log_copy_interval;
+char *ibx_xtrabackup_incremental;
+int ibx_xtrabackup_parallel;
+my_bool ibx_xtrabackup_rebuild_indexes;
+ulint ibx_xtrabackup_rebuild_threads;
+char *ibx_xtrabackup_stream_str;
+char *ibx_xtrabackup_tables_file;
+long ibx_xtrabackup_throttle;
+char *ibx_opt_mysql_tmpdir;
+longlong ibx_xtrabackup_use_memory;
+
 
 static inline int ibx_msg(const char *fmt, ...) ATTRIBUTE_FORMAT(printf, 1, 2);
 static inline int ibx_msg(const char *fmt, ...)
@@ -98,16 +214,12 @@ static inline int ibx_msg(const char *fmt, ...)
 	return result;
 }
 
-/**
-  Check to see if a file exists.
-
-  @param[in]  filename  File to locate.
-
-  @retval int file not found = 1, file found = 0
-*/
-
+/************************************************************************
+Check to see if a file exists.
+Takes name of the file to check.
+@return true if file exists. */
 static
-bool 
+bool
 file_exists(const char *filename)
 {
 	MY_STAT stat_arg;
@@ -120,6 +232,9 @@ file_exists(const char *filename)
 	return(true);
 }
 
+/************************************************************************
+Check if string ends with given suffix.
+@return true if string ends with given suffix. */
 static
 bool
 ends_with(const char *str, const char *suffix)
@@ -129,6 +244,9 @@ ends_with(const char *str, const char *suffix)
 	return(p != NULL && strcmp(p, suffix) == 0);
 }
 
+/************************************************************************
+Create directories recursively.
+@return 0 if directories created successfully. */
 static
 int
 mkdirp(const char *pathname, int Flags, myf MyFlags)
@@ -137,9 +255,9 @@ mkdirp(const char *pathname, int Flags, myf MyFlags)
 
 	/* make a parent directory path */
 	strncpy(parent, pathname, sizeof(parent));
-	parent[sizeof(parent) - 1] = '\0';
+	parent[sizeof(parent) - 1] = 0;
 	for(p = parent + strlen(parent); *p != '/' && p != parent; p--);
-	*p = '\0';
+	*p = 0;
 
 	/* try to make parent directory */
 	if(p != parent && mkdirp(parent, Flags, MyFlags) != 0) {
@@ -159,6 +277,8 @@ mkdirp(const char *pathname, int Flags, myf MyFlags)
 	return(-1);
 }
 
+/************************************************************************
+Struct represents file or directory. */
 struct datadir_node_t {
 	ulint		dbpath_len;
 	char		*filepath;
@@ -169,6 +289,8 @@ struct datadir_node_t {
 	bool		is_file;
 };
 
+/************************************************************************
+Holds the state needed to enumerate files in MySQL data directory. */
 struct datadir_iter_t {
 	char		*datadir_path;
 	char		*dbpath;
@@ -188,6 +310,8 @@ struct datadir_iter_t {
 	bool		skip_first_level;
 };
 
+/************************************************************************
+Holds the state needed to copy single data file. */
 struct datafile_cur_t {
 	os_file_t	file;
 	fil_node_t*	node;
@@ -197,13 +321,13 @@ struct datafile_cur_t {
 	uint		thread_n;
 	byte*		orig_buf;
 	byte*		buf;
-	ib_int64_t	buf_size;	/*!< buffer size in bytes */
-	ib_int64_t	buf_read;	/*!< number of read bytes in buffer
-					after the last cursor read */
-	ib_int64_t	buf_offset;	/*!< file offset of the first page in
-					buffer */
+	ib_int64_t	buf_size;
+	ib_int64_t	buf_read;
+	ib_int64_t	buf_offset;
 };
 
+/************************************************************************
+Represents the context of the thread processing MySQL data directory. */
 struct datadir_thread_ctxt_t {
 	datadir_iter_t		*it;
 	uint			n_thread;
@@ -214,18 +338,23 @@ struct datadir_thread_ctxt_t {
 };
 
 
+/************************************************************************
+Fill the node struct. Memory for node need to be allocated and freed by
+the caller. It is caller responsibility to initialize node with
+datadir_node_init and cleanup the memory with datadir_node_free.
+Node can not be shared between threads. */
 static
 void
 datadir_node_fill(datadir_node_t *node, datadir_iter_t *it)
 {
 	if (node->filepath_len < it->filepath_len) {
 		free(node->filepath);
-		node->filepath = (char*)malloc(it->filepath_len);
+		node->filepath = (char*)(ut_malloc(it->filepath_len));
 		node->filepath_len = it->filepath_len;
 	}
 	if (node->filepath_rel_len < it->filepath_rel_len) {
 		free(node->filepath_rel);
-		node->filepath_rel = (char*)malloc(it->filepath_rel_len);
+		node->filepath_rel = (char*)(ut_malloc(it->filepath_rel_len));
 		node->filepath_rel_len = it->filepath_rel_len;
 	}
 
@@ -239,8 +368,8 @@ static
 void
 datadir_node_free(datadir_node_t *node)
 {
-	free(node->filepath);
-	free(node->filepath_rel);
+	ut_free(node->filepath);
+	ut_free(node->filepath_rel);
 	memset(node, 0, sizeof(datadir_node_t));
 }
 
@@ -251,6 +380,12 @@ datadir_node_init(datadir_node_t *node)
 	memset(node, 0, sizeof(datadir_node_t));
 }
 
+/************************************************************************
+Create the MySQL data directory iterator. Memory needs to be released
+with datadir_iter_free. Position should be advanced with
+datadir_iter_next_file. Iterator can be shared between multiple
+threads. It is guaranteed that each thread receives unique file from
+data directory into its local node struct. */
 static
 datadir_iter_t *
 datadir_iter_new(const char *path, bool skip_first_level = true)
@@ -490,6 +625,11 @@ done:
 	return(ret);
 }
 
+/************************************************************************
+Interface to read MySQL data file sequentially. One should open file
+with datafile_open to get cursor and close the cursor with
+datafile_close. Cursor can not be shared between multiple
+threads. */
 static
 void
 datadir_iter_free(datadir_iter_t *it)
@@ -508,6 +648,7 @@ datadir_iter_free(datadir_iter_t *it)
 
 	ut_free(it->dbpath);
 	ut_free(it->filepath);
+	ut_free(it->filepath_rel);
 	free(it->datadir_path);
 	ut_free(it);
 }
@@ -519,6 +660,7 @@ datafile_close(datafile_cur_t *cursor)
 	if (cursor->file != 0) {
 		os_file_close(cursor->file);
 	}
+	ut_free(cursor->buf);
 }
 
 static
@@ -604,6 +746,10 @@ datafile_read(datafile_cur_t *cursor)
 	return(XB_FIL_CUR_SUCCESS);
 }
 
+/************************************************************************
+Check if directory exists. Optionally create directory if doesn't
+exist.
+@return true if directory exists and if it was created successfully. */
 static
 bool
 directory_exists(const char *dir, bool create)
@@ -640,6 +786,8 @@ directory_exists(const char *dir, bool create)
 	return(true);
 }
 
+/************************************************************************
+Check that directory exists and it is empty. */
 static
 bool
 directory_exists_and_empty(const char *dir, const char *comment)
@@ -672,6 +820,9 @@ directory_exists_and_empty(const char *dir, const char *comment)
 }
 
 
+/************************************************************************
+Copy file for backup/restore.
+@return true in case of success. */
 static
 bool
 copy_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
@@ -728,6 +879,10 @@ error:
 }
 
 
+/************************************************************************
+Try to move file by renaming it. If source and destination are on
+different devices fall back to copy and unlink.
+@return true in case of success. */
 static
 bool
 move_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
@@ -747,7 +902,8 @@ move_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
 	}
 
 	if (file_exists(dst_file_path_abs)) {
-		ibx_msg("Move file %s to %s failed: Destination file exists\n",
+		ibx_msg("Error: Move file %s to %s failed: Destination "
+			"file exists\n",
 			src_file_path, dst_file_path_abs);
 		return(false);
 	}
@@ -757,8 +913,18 @@ move_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
 
 	if (my_rename(src_file_path, dst_file_path_abs, MYF(0)) != 0) {
 		if (my_errno == EXDEV) {
-			return copy_file(src_file_path,
+			bool ret;
+			ret = copy_file(src_file_path,
 					dst_file_path, thread_n);
+			ibx_msg("[%02u] Removing %s\n",
+					thread_n, src_file_path);
+			if (unlink(src_file_path) != 0) {
+				ibx_msg("Error: unlink %s failed: %s\n",
+					src_file_path,
+					my_strerror(errbuf,
+						    sizeof(errbuf), errno));
+			}
+			return(ret);
 		}
 		ibx_msg("Can not move file %s to %s: %s\n",
 			src_file_path, dst_file_path_abs,
@@ -772,6 +938,9 @@ move_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
 }
 
 
+/************************************************************************
+Copy or move file depending on current mode.
+@return true in case of success. */
 static
 bool
 copy_or_move_file(const char *src_file_path,
@@ -783,6 +952,9 @@ copy_or_move_file(const char *src_file_path,
 }
 
 
+/************************************************************************
+Check if file name ends with given set of suffixes.
+@return true if it does. */
 static
 bool
 filename_matches(const char *filename, const char **ext_list)
@@ -799,6 +971,11 @@ filename_matches(const char *filename, const char **ext_list)
 }
 
 
+/************************************************************************
+Copy data file for backup. Also check if it is allowed to copy by
+comparing its name to the list of known data file types and checking
+if passes the rules for partial backup.
+@return true if file backed up or skipped successfully. */
 static
 bool
 datafile_copy_backup(const char *filepath, uint thread_n)
@@ -829,6 +1006,9 @@ datafile_copy_backup(const char *filepath, uint thread_n)
 }
 
 
+/************************************************************************
+Same as datafile_copy_backup, but put file name into the list for
+rsync command. */
 static
 bool
 datafile_rsync_backup(const char *filepath, bool save_to_list, FILE *f)
@@ -981,120 +1161,6 @@ run_data_threads(datadir_iter_t *it, os_thread_func_t func, uint n)
 
 	return(ret);
 }
-
-/** connection to mysql server */
-static MYSQL *mysql_connection;
-
-/* server capabilities */
-static bool have_changed_page_bitmaps = false;
-static bool have_backup_locks = false;
-static bool have_lock_wait_timeout = false;
-static bool have_galera_enabled = false;
-static bool have_flush_engine_logs = false;
-static bool have_multi_threaded_slave = false;
-static bool have_gtid_slave = false;
-
-/* options */
-my_bool opt_ibx_version = FALSE;
-my_bool opt_ibx_help = FALSE;
-my_bool opt_ibx_apply_log = FALSE;
-my_bool opt_ibx_copy_back = FALSE;
-my_bool opt_ibx_move_back = FALSE;
-my_bool opt_ibx_redo_only = FALSE;
-my_bool opt_ibx_galera_info = FALSE;
-my_bool opt_ibx_slave_info = FALSE;
-my_bool opt_ibx_incremental = FALSE;
-my_bool opt_ibx_no_lock = FALSE;
-my_bool opt_ibx_safe_slave_backup = FALSE;
-my_bool opt_ibx_rsync = FALSE;
-my_bool opt_ibx_force_non_empty_dirs = FALSE;
-my_bool opt_ibx_notimestamp = FALSE;
-my_bool opt_ibx_no_backup_locks = FALSE;
-my_bool opt_ibx_decompress = FALSE;
-
-char *opt_ibx_incremental_history_name = NULL;
-char *opt_ibx_incremental_history_uuid = NULL;
-
-char *opt_ibx_user = NULL;
-char *opt_ibx_password = NULL;
-char *opt_ibx_host = NULL;
-char *opt_ibx_defaults_group = NULL;
-char *opt_ibx_socket = NULL;
-uint opt_ibx_port = 0;
-
-const char *ibx_query_type_names[] = { "ALL", "UPDATE", "SELECT", NullS};
-
-enum ibx_query_type_t {IBX_QUERY_TYPE_ALL, IBX_QUERY_TYPE_UPDATE,
-			IBX_QUERY_TYPE_SELECT};
-
-TYPELIB ibx_query_type_typelib= {array_elements(ibx_query_type_names) - 1, "",
-	ibx_query_type_names, NULL};
-
-ibx_query_type_t opt_ibx_lock_wait_query_type;
-ibx_query_type_t opt_ibx_kill_long_query_type;
-
-ulong opt_ibx_decrypt_algo = 0;
-
-uint opt_ibx_kill_long_queries_timeout = 0;
-uint opt_ibx_lock_wait_timeout = 0;
-uint opt_ibx_lock_wait_threshold = 0;
-uint opt_ibx_debug_sleep_before_unlock = 0;
-uint opt_ibx_safe_slave_backup_timeout = 0;
-
-const char *opt_ibx_history = NULL;
-char *opt_ibx_include = NULL;
-char *opt_ibx_databases = NULL;
-bool ibx_partial_backup = false;
-bool opt_ibx_decrypt = false;
-
-os_thread_id_t	kill_query_thread_id;
-os_event_t	kill_query_thread_started;
-os_event_t	kill_query_thread_stopped;
-os_event_t	kill_query_thread_stop;
-
-bool sql_thread_started = false;
-char *mysql_slave_position = NULL;
-char *mysql_binlog_position = NULL;
-char *buffer_pool_filename = NULL;
-
-char *ibx_position_arg = NULL;
-char *ibx_backup_directory = NULL;
-
-time_t history_start_time;
-time_t history_end_time;
-time_t history_lock_time;
-
-char *tool_name;
-char tool_args[2048];
-
-char *innobase_data_file_path_alloc = NULL;
-
-/* copy of proxied xtrabackup options */
-my_bool ibx_xb_close_files;
-my_bool	ibx_xtrabackup_compact;
-const char *ibx_xtrabackup_compress_alg;
-uint ibx_xtrabackup_compress_threads;
-ulonglong ibx_xtrabackup_compress_chunk_size;
-ulong ibx_xtrabackup_encrypt_algo;
-char *ibx_xtrabackup_encrypt_key;
-char *ibx_xtrabackup_encrypt_key_file;
-uint ibx_xtrabackup_encrypt_threads;
-ulonglong ibx_xtrabackup_encrypt_chunk_size;
-my_bool ibx_xtrabackup_export;
-char *ibx_xtrabackup_extra_lsndir;
-char *ibx_xtrabackup_incremental_basedir;
-char *ibx_xtrabackup_incremental_dir;
-my_bool	ibx_xtrabackup_incremental_force_scan;
-ulint ibx_xtrabackup_log_copy_interval;
-char *ibx_xtrabackup_incremental;
-int ibx_xtrabackup_parallel;
-my_bool ibx_xtrabackup_rebuild_indexes;
-ulint ibx_xtrabackup_rebuild_threads;
-char *ibx_xtrabackup_stream_str;
-char *ibx_xtrabackup_tables_file;
-long ibx_xtrabackup_throttle;
-char *ibx_opt_mysql_tmpdir;
-longlong ibx_xtrabackup_use_memory;
 
 enum innobackupex_options
 {
@@ -1449,201 +1515,6 @@ static struct my_option ibx_long_options[] =
 	 &opt_ibx_decrypt_algo, &opt_ibx_decrypt_algo,
 	 &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
-
-
-	/* Following command-line options are actually handled by xtrabackup.
-	We put them here with only purpose for them to showup in
-	innobackupex --help output */
-
-	// {"close_files", OPT_CLOSE_FILES, "Do not keep files opened. This "
-	//  "option is passed directly to xtrabackup. Use at your own risk.",
-	//  (uchar*) &xb_close_files, (uchar*) &xb_close_files, 0, GET_BOOL,
-	//  NO_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"compact", OPT_COMPACT, "Create a compact backup with all secondary "
-	//  "index pages omitted. This option is passed directly to xtrabackup. "
-	//  "See xtrabackup documentation for details.",
-	//  (uchar*) &xtrabackup_compact, (uchar*) &xtrabackup_compact,
-	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"compress", OPT_COMPRESS, "This option instructs xtrabackup to "
-	//  "compress backup copies of InnoDB data files. It is passed directly "
-	//  "to the xtrabackup child process. Try 'xtrabackup --help' for more "
-	//  "details.", (uchar*) &xtrabackup_compress_alg,
-	//  (uchar*) &xtrabackup_compress_alg, 0,
-	//  GET_STR, OPT_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"compress-threads", OPT_COMPRESS_THREADS,
-	//  "This option specifies the number of worker threads that will be used "
-	//  "for parallel compression. It is passed directly to the xtrabackup "
-	//  "child process. Try 'xtrabackup --help' for more details.",
-	//  (uchar*) &xtrabackup_compress_threads,
-	//  (uchar*) &xtrabackup_compress_threads,
-	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
-
-	// {"compress-chunk-size", OPT_COMPRESS_CHUNK_SIZE, "Size of working "
-	//  "buffer(s) for compression threads in bytes. The default value "
-	//  "is 64K.", (uchar*) &xtrabackup_compress_chunk_size,
-	//  (uchar*) &xtrabackup_compress_chunk_size,
-	//  0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
-
-	// {"encrypt", OPT_ENCRYPT, "This option instructs xtrabackup to encrypt "
-	//  "backup copies of InnoDB data files using the algorithm specified in "
-	//  "the ENCRYPTION-ALGORITHM. It is passed directly to the xtrabackup "
-	//  "child process. Try 'xtrabackup --help' for more details.",
-	//  &xtrabackup_encrypt_algo, &xtrabackup_encrypt_algo,
-	//  &xtrabackup_encrypt_algo_typelib, GET_ENUM, REQUIRED_ARG,
-	//  0, 0, 0, 0, 0, 0},
-
-	// {"encrypt-key", OPT_ENCRYPT_KEY, "This option instructs xtrabackup to "
-	//  "use the given ENCRYPTION-KEY when using the --encrypt or --decrypt "
-	//  "options. During backup it is passed directly to the xtrabackup child "
-	//  "process. Try 'xtrabackup --help' for more details.",
-	//  (uchar*) &xtrabackup_encrypt_key, (uchar*) &xtrabackup_encrypt_key, 0,
-	//  GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"encrypt-key-file", OPT_ENCRYPT_KEY_FILE, "This option instructs "
-	//  "xtrabackup to use the encryption key stored in the given "
-	//  "ENCRYPTION-KEY-FILE when using the --encrypt or --decrypt options.",
-	//  (uchar*) &xtrabackup_encrypt_key_file,
-	//  (uchar*) &xtrabackup_encrypt_key_file, 0,
-	//  GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"encrypt-threads", OPT_ENCRYPT_THREADS,
-	//  "This option specifies the number of worker threads that will be used "
-	//  "for parallel encryption. It is passed directly to the xtrabackup "
-	//  "child process. Try 'xtrabackup --help' for more details.",
-	//  (uchar*) &xtrabackup_encrypt_threads,
-	//  (uchar*) &xtrabackup_encrypt_threads,
-	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
-
-	// {"encrypt-chunk-size", OPT_ENCRYPT_CHUNK_SIZE,
-	//  "This option specifies the size of the internal working buffer for "
-	//  "each encryption thread, measured in bytes. It is passed directly to "
-	//  "the xtrabackup child process. Try 'xtrabackup --help' for more "
-	//  "details.",
-	//  (uchar*) &xtrabackup_encrypt_chunk_size,
-	//  (uchar*) &xtrabackup_encrypt_chunk_size,
-	//  0, GET_ULL, REQUIRED_ARG, (1 << 16), 1024, ULONGLONG_MAX, 0, 0, 0},
-
-	// {"export", OPT_EXPORT, "This option is passed directly to xtrabackup's "
-	//  "--export option. It enables exporting individual tables for import "
-	//  "into another server. See the xtrabackup documentation for details.",
-	//  (uchar*) &xtrabackup_export, (uchar*) &xtrabackup_export,
-	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"extra-lsndir", OPT_EXTRA_LSNDIR, "This option specifies the "
-	//  "directory in which to save an extra copy of the "
-	//  "\"xtrabackup_checkpoints\" file. The option accepts a string "
-	//  "argument. It is passed directly to xtrabackup's --extra-lsndir "
-	//  "option. See the xtrabackup documentation for details.",
-	//  (uchar*) &xtrabackup_extra_lsndir, (uchar*) &xtrabackup_extra_lsndir,
-	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"incremental-basedir", OPT_INCREMENTAL_BASEDIR, "This option "
-	//  "specifies the directory containing the full backup that is the base "
-	//  "dataset for the incremental backup.  The option accepts a string "
-	//  "argument. It is used with the --incremental option.",
-	//  (uchar*) &xtrabackup_incremental_basedir,
-	//  (uchar*) &xtrabackup_incremental_basedir,
-	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"incremental-dir", OPT_INCREMENTAL_DIR, "This option specifies the "
-	//  "directory where the incremental backup will be combined with the "
-	//  "full backup to make a new full backup.  The option accepts a string "
-	//  "argument. It is used with the --incremental option.",
-	//  (uchar*) &xtrabackup_incremental_dir,
-	//  (uchar*) &xtrabackup_incremental_dir,
-	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"incremental-force-scan", OPT_INCREMENTAL_FORCE_SCAN,
-	//  "This options tells xtrabackup to perform full scan of data files "
-	//  "for taking an incremental backup even if full changed page bitmap "
-	//  "data is available to enable the backup without the full scan.",
-	//  (uchar*)&xtrabackup_incremental_force_scan,
-	//  (uchar*)&xtrabackup_incremental_force_scan, 0, GET_BOOL, NO_ARG,
-	//  0, 0, 0, 0, 0, 0},
-
-	// {"log-copy-interval", OPT_LOG_COPY_INTERVAL, "This option specifies "
-	//  "time interval between checks done by log copying thread in "
-	//  "milliseconds.", (uchar*) &xtrabackup_log_copy_interval,
-	//  (uchar*) &xtrabackup_log_copy_interval,
-	//  0, GET_LONG, REQUIRED_ARG, 1000, 0, LONG_MAX, 0, 1, 0},
-
-	// {"incremental-lsn", OPT_INCREMENTAL, "This option specifies the log "
-	//  "sequence number (LSN) to use for the incremental backup.  The option "
-	//  "accepts a string argument. It is used with the --incremental option. "
-	//  "It is used instead of specifying --incremental-basedir. For "
-	//  "databases created by MySQL and Percona Server 5.0-series versions, "
-	//  "specify the LSN as two 32-bit integers in high:low format. For "
-	//  "databases created in 5.1 and later, specify the LSN as a single "
-	//  "64-bit integer.",
-	//  (uchar*) &xtrabackup_incremental, (uchar*) &xtrabackup_incremental,
-	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"parallel", OPT_PARALLEL, "On backup, this option specifies the "
-	//  "number of threads the xtrabackup child process should use to back "
-	//  "up files concurrently.  The option accepts an integer argument. It "
-	//  "is passed directly to xtrabackup's --parallel option. See the "
-	//  "xtrabackup documentation for details.",
-	//  (uchar*) &xtrabackup_parallel, (uchar*) &xtrabackup_parallel, 0,
-	//  GET_INT, REQUIRED_ARG, 1, 1, INT_MAX, 0, 0, 0},
-
-	// {"rebuild-indexes", OPT_REBUILD_INDEXES,
-	//  "This option only has effect when used together with the --apply-log "
-	//  "option and is passed directly to xtrabackup. When used, makes "
-	//  "xtrabackup rebuild all secondary indexes after applying the log. "
-	//  "This option is normally used to prepare compact backups. See the "
-	//  "XtraBackup manual for more information.",
-	//  (uchar*) &xtrabackup_rebuild_indexes,
-	//  (uchar*) &xtrabackup_rebuild_indexes,
-	//  0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"rebuild-threads", OPT_REBUILD_THREADS,
-	//  "Use this number of threads to rebuild indexes in a compact backup. "
-	//  "Only has effect with --prepare and --rebuild-indexes.",
-	//  (uchar*) &xtrabackup_rebuild_threads,
-	//  (uchar*) &xtrabackup_rebuild_threads,
-	//  0, GET_UINT, REQUIRED_ARG, 1, 1, UINT_MAX, 0, 0, 0},
-
-	// {"stream", OPT_STREAM, "This option specifies the format in which to "
-	//  "do the streamed backup.  The option accepts a string argument. The "
-	//  "backup will be done to STDOUT in the specified format. Currently, "
-	//  "the only supported formats are tar and xbstream. This option is "
-	//  "passed directly to xtrabackup's --stream option.",
-	//  (uchar*) &xtrabackup_stream_str,
-	//  (uchar*) &xtrabackup_stream_str, 0, GET_STR,
-	//  REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"tables-file", OPT_TABLES_FILE, "This option specifies the file in "
-	//  "which there are a list of names of the form database.  The option "
-	//  "accepts a string argument.table, one per line. The option is passed "
-	//  "directly to xtrabackup's --tables-file option.",
-	//  (uchar*) &xtrabackup_tables_file, (uchar*) &xtrabackup_tables_file,
-	//  0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-
-	// {"throttle", OPT_THROTTLE, "This option specifies a number of I/O "
-	//  "operations (pairs of read+write) per second.  It accepts an integer "
-	//  "argument.  It is passed directly to xtrabackup's --throttle option.",
-	//  (uchar*) &xtrabackup_throttle, (uchar*) &xtrabackup_throttle,
-	//  0, GET_LONG, REQUIRED_ARG, 0, 0, LONG_MAX, 0, 1, 0},
-
-	// {"tmpdir", 't', "This option specifies the location where a temporary "
-	//  "files will be stored. If the option is not specified, the default is "
-	//  "to use the value of tmpdir read from the server configuration.",
-	//  (uchar*) &opt_mysql_tmpdir,
-	//  (uchar*) &opt_mysql_tmpdir, 0, GET_STR, REQUIRED_ARG,
-	//  0, 0, 0, 0, 0, 0},
-
-	// {"use-memory", OPT_USE_MEMORY, "This option accepts a string argument "
-	//  "that specifies the amount of memory in bytes for xtrabackup to use "
-	//  "for crash recovery while preparing a backup. Multiples are supported "
-	//  "providing the unit (e.g. 1MB, 1GB). It is used only with the option "
-	//  "--apply-log. It is passed directly to xtrabackup's --use-memory "
-	//  "option. See the xtrabackup documentation for details.",
-	//  (uchar*) &xtrabackup_use_memory, (uchar*) &xtrabackup_use_memory,
-	//  0, GET_LL, REQUIRED_ARG, 100*1024*1024L, 1024*1024L, LONGLONG_MAX, 0,
-	//  1024*1024L, 0},
 
 
 	/* Following command-line options are actually handled by xtrabackup.
@@ -2284,11 +2155,11 @@ get_mysql_vars(MYSQL *connection)
 
 	/* make sure datadir value is the same in configuration file */
 	if (mysql_data_home != NULL && datadir_var != NULL) {
-		char real_data_home[FN_REFLEN];
-		char real_datadir[FN_REFLEN];
+		char real_data_home[PATH_MAX];
+		char real_datadir[PATH_MAX];
 
-		realpath(mysql_data_home, real_data_home);
-		realpath(datadir_var, real_datadir);
+		ut_a(realpath(mysql_data_home, real_data_home) != NULL);
+		ut_a(realpath(datadir_var, real_datadir) != NULL);
 
 		if (!(ret = strcmp(real_data_home, real_datadir) == 0)) {
 			ibx_msg("Error: option 'datadir' has different "
@@ -2904,23 +2775,23 @@ write_slave_info(MYSQL *connection)
 			"CHANGE MASTER TO MASTER_AUTO_POSITION=1\n",
 			gtid_executed);
 
-		asprintf(&mysql_slave_position,
+		ut_a(asprintf(&mysql_slave_position,
 			"master host '%s', purge list '%s'",
-			master, gtid_executed);
+			master, gtid_executed) != -1);
 	} else if (gtid_slave_pos && *gtid_slave_pos) {
 		/* MariaDB >= 10.0 with GTID enabled */
 		result = backup_file_printf("xtrabackup_slave_info",
 			"CHANGE MASTER TO master_use_gtid = slave_pos\n");
-		asprintf(&mysql_slave_position,
+		ut_a(asprintf(&mysql_slave_position,
 			"master host '%s', gtid_slave_pos %s",
-			master, gtid_slave_pos);
+			master, gtid_slave_pos) != -1);
 	} else {
 		result = backup_file_printf("xtrabackup_slave_info",
 			"CHANGE MASTER TO MASTER_LOG_FILE='%s', "
 			"MASTER_LOG_POS=%s\n", filename, position);
-		asprintf(&mysql_slave_position,
+		ut_a(asprintf(&mysql_slave_position,
 			"master host '%s', filename '%s', position '%s",
-			master, filename, position);
+			master, filename, position) != -1);
 	}
 
 cleanup:
@@ -3099,20 +2970,21 @@ write_binlog_info(MYSQL *connection)
 	gtid = (gtid_executed != NULL ? gtid_executed : gtid_current_pos);
 
 	if (mariadb_gtid) {
-		asprintf(&mysql_binlog_position,
+		ut_a(asprintf(&mysql_binlog_position,
 			"filename '%s', position '%s', "
 			"GTID of the last change '%s'",
-			filename, position, gtid);
+			filename, position, gtid) != -1);
 		result = backup_file_printf("xtrabackup_binlog_info",
 				"%s\t%s\t%s", filename, position, gtid);
 	} else if (mysql_gtid) {
-		asprintf(&mysql_binlog_position,
-			"GTID of the last change '%s'", gtid);
+		ut_a(asprintf(&mysql_binlog_position,
+			"GTID of the last change '%s'", gtid) != -1);
 		result = backup_file_printf("xtrabackup_binlog_info",
 				"%s", gtid);
 	} else {
-		asprintf(&mysql_binlog_position,
-			"filename '%s', position '%s'", filename, position);
+		ut_a(asprintf(&mysql_binlog_position,
+			"filename '%s', position '%s'",
+			filename, position) != -1);
 		result = backup_file_printf("xtrabackup_binlog_info",
 				"%s\t%s", filename, position);
 	}
@@ -3146,6 +3018,15 @@ write_xtrabackup_info(MYSQL *connection)
 	my_bool null = TRUE;
 
 	const char *xb_stream_name[] = {"file", "tar", "xbstream"};
+	const char *ins_query = "insert into PERCONA_SCHEMA.xtrabackup_history("
+		"uuid, name, tool_name, tool_command, tool_version, "
+		"ibbackup_version, server_version, start_time, end_time, "
+		"lock_time, binlog_pos, innodb_from_lsn, innodb_to_lsn, "
+		"partial, incremental, format, compact, compressed, "
+		"encrypted) "
+		"values(?,?,?,?,?,?,?,from_unixtime(?),from_unixtime(?),"
+		"?,?,?,?,?,?,?,?,?,?)";
+
 	ut_ad(xtrabackup_stream_fmt < 3);
 
 	uuid = read_mysql_one_value(connection, "SELECT UUID()");
@@ -3201,7 +3082,7 @@ write_xtrabackup_info(MYSQL *connection)
 		xtrabackup_encrypt ? "Y" : "N"); /* encrypted */
 
 	if (!opt_ibx_history) {
-		return(true);
+		goto cleanup;
 	}
 
 	ibx_mysql_query(connection,
@@ -3230,15 +3111,6 @@ write_xtrabackup_info(MYSQL *connection)
 		") CHARACTER SET utf8 ENGINE=innodb", false);
 
 	stmt = mysql_stmt_init(connection);
-
-	const char *ins_query = "insert into PERCONA_SCHEMA.xtrabackup_history("
-		"uuid, name, tool_name, tool_command, tool_version, "
-		"ibbackup_version, server_version, start_time, end_time, "
-		"lock_time, binlog_pos, innodb_from_lsn, innodb_to_lsn, "
-		"partial, incremental, format, compact, compressed, "
-		"encrypted) "
-		"values(?,?,?,?,?,?,?,from_unixtime(?),from_unixtime(?),"
-		"?,?,?,?,?,?,?,?,?,?)";
 
 	mysql_stmt_prepare(stmt, ins_query, strlen(ins_query));
 
@@ -3366,6 +3238,11 @@ write_xtrabackup_info(MYSQL *connection)
 
 	mysql_stmt_execute(stmt);
 	mysql_stmt_close(stmt);
+
+cleanup:
+
+	free(uuid);
+	free(server_version);
 
 	return(true);
 }
@@ -3512,7 +3389,8 @@ backup_files(const char *from, bool prep_mode)
 				char dst_path[FN_REFLEN];
 				char *newline;
 
-				fgets(path, sizeof(path), rsync_tmpfile);
+				ut_a(fgets(path, sizeof(path), rsync_tmpfile)
+						!= NULL);
 				newline = strchr(path, '\n');
 				if (newline) {
 					*newline = 0;
@@ -3553,7 +3431,8 @@ make_backup_dir()
 
 	if (!opt_ibx_notimestamp) {
 		strftime(buf, sizeof(buf), "%Y-%m-%d_%H-%M-%S", localtime(&t));
-		asprintf(&ibx_backup_directory, "%s/%s", ibx_position_arg, buf);
+		ut_a(asprintf(&ibx_backup_directory, "%s/%s",
+				ibx_position_arg, buf) != -1);
 	} else {
 		ibx_backup_directory = strdup(ibx_position_arg);
 	}
