@@ -39,6 +39,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 *******************************************************/
 
+#include <my_global.h>
 #include <stdio.h>
 #include <string.h>
 #include <mysql/mysql.h>
@@ -2468,7 +2469,7 @@ wait_for_no_updates(MYSQL *connection, uint timeout, uint threshold)
 	ibx_msg("Waiting %u seconds for queries running longer than %u seconds "
 		"to finish\n", timeout, threshold);
 
-	while (time(NULL) <= start_time + timeout) {
+	while (time(NULL) <= (time_t)(start_time + timeout)) {
 		if (!have_queries_to_wait_for(connection, threshold)) {
 			return(true);
 		}
@@ -2496,7 +2497,8 @@ kill_query_thread(
 	ibx_msg("Kill query timeout %d seconds.\n",
 		opt_ibx_kill_long_queries_timeout);
 
-	while (time(NULL) - start_time < opt_ibx_kill_long_queries_timeout) {
+	while (time(NULL) - start_time <
+				(time_t)opt_ibx_kill_long_queries_timeout) {
 		if (os_event_wait_time(kill_query_thread_stop, 1000) !=
 		    OS_SYNC_TIME_EXCEEDED) {
 			goto stop_thread;
@@ -4087,11 +4089,23 @@ ibx_copy_back()
 		return(false);
 	}
 
+	srv_max_n_threads = 1000;
+	os_sync_mutex = NULL;
+	ut_mem_init();
+	/* temporally dummy value to avoid crash */
+	srv_page_size_shift = 14;
+	srv_page_size = (1 << srv_page_size_shift);
+	os_sync_init();
+	sync_init();
+	os_io_init_simple();
+	mem_init(srv_mem_pool_size);
+	ut_crc32_init();
+
 	/* copy undo tablespaces */
 	if (srv_undo_tablespaces > 0) {
 
-		ds_data = ds_create(srv_undo_dir && *srv_undo_dir ?
-					srv_undo_dir : mysql_data_home,
+		ds_data = ds_create((srv_undo_dir && *srv_undo_dir)
+					? srv_undo_dir : mysql_data_home,
 				DS_TYPE_LOCAL);
 
 		for (i = 1; i <= srv_undo_tablespaces; i++) {
@@ -4108,8 +4122,8 @@ ibx_copy_back()
 
 	/* copy redo logs */
 
-	ds_data = ds_create(srv_log_group_home_dir && *srv_log_group_home_dir ?
-				srv_log_group_home_dir : mysql_data_home,
+	ds_data = ds_create((srv_log_group_home_dir && *srv_log_group_home_dir)
+				? srv_log_group_home_dir : mysql_data_home,
 			DS_TYPE_LOCAL);
 
 	for (i = 0; i < (ulong)innobase_log_files_in_group; i++) {
@@ -4130,8 +4144,8 @@ ibx_copy_back()
 
 	/* copy innodb system tablespace(s) */
 
-	ds_data = ds_create(innobase_data_home_dir && *innobase_data_home_dir ?
-				innobase_data_home_dir : mysql_data_home,
+	ds_data = ds_create((innobase_data_home_dir && *innobase_data_home_dir)
+				? innobase_data_home_dir : mysql_data_home,
 			DS_TYPE_LOCAL);
 
 	for (i = 0; i < srv_n_data_files; i++) {
@@ -4240,6 +4254,13 @@ cleanup:
 	}
 
 	ds_data = NULL;
+
+	sync_close();
+	sync_initialized = FALSE;
+	os_sync_free();
+	mem_close();
+	os_sync_mutex = NULL;
+	ut_free_all_mem();
 
 	return(ret);
 }
