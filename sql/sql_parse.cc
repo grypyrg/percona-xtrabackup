@@ -672,6 +672,7 @@ void execute_init_command(THD *thd, LEX_STRING *init_command,
 #endif
 }
 
+#ifndef EMBEDDED_LIBRARY
 static char *fgets_fn(char *buffer, size_t size, fgets_input_t input, int *error)
 {
   MYSQL_FILE *in= static_cast<MYSQL_FILE*> (input);
@@ -797,6 +798,7 @@ static void handle_bootstrap_impl(THD *thd)
 
   DBUG_VOID_RETURN;
 }
+#endif
 
 
 /**
@@ -817,6 +819,7 @@ pthread_handler_t handle_bootstrap(void *arg)
 
 void do_handle_bootstrap(THD *thd)
 {
+#ifndef EMBEDDED_LIBRARY
   bool thd_added= false;
   /* The following must be called before DBUG_ENTER */
   thd->thread_stack= (char*) &thd;
@@ -860,6 +863,7 @@ end:
   pthread_exit(0);
 #endif
 
+#endif
   return;
 }
 

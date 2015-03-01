@@ -42,6 +42,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <string.h>
 #include <mysql/mysql.h>
+#ifdef WARN_PLUGIN_DELETE_BUILTIN
+#undef WARN_PLUGIN_DELETE_BUILTIN
+#endif
 #include <my_dir.h>
 #include <ut0mem.h>
 #include <os0sync.h>

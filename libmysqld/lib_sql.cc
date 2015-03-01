@@ -340,6 +340,7 @@ static my_bool emb_read_query_result(MYSQL *mysql)
 
 static int emb_stmt_execute(MYSQL_STMT *stmt)
 {
+#ifndef EMBEDDED_LIBRARY
   DBUG_ENTER("emb_stmt_execute");
   uchar header[5];
   THD *thd;
@@ -366,6 +367,9 @@ static int emb_stmt_execute(MYSQL_STMT *stmt)
   else if (stmt->mysql->status == MYSQL_STATUS_GET_RESULT)
            stmt->mysql->status= MYSQL_STATUS_STATEMENT_GET_RESULT;
   DBUG_RETURN(0);
+#else
+  return 0;
+#endif
 }
 
 int emb_read_binary_rows(MYSQL_STMT *stmt)

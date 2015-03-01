@@ -190,6 +190,7 @@ static inline Host_entry *hostname_cache_search(const char *ip_key)
   return (Host_entry *) hostname_cache->search((uchar *) ip_key, 0);
 }
 
+#ifndef EMBEDDED_LIBRARY
 static void add_hostname_impl(const char *ip_key, const char *hostname,
                               bool validated, Host_errors *errors,
                               ulonglong now)
@@ -288,6 +289,7 @@ static void add_hostname(const char *ip_key, const char *hostname,
 
   return;
 }
+#endif
 
 void inc_host_errors(const char *ip_string, Host_errors *errors)
 {
