@@ -233,6 +233,27 @@ file_exists(const char *filename)
 }
 
 /************************************************************************
+Trim leading slashes from absolute path so it becomes relative */
+static
+const char *
+trim_root(const char *path)
+{
+	while (*path) {
+		if (*path == '/') {
+			++path;
+			continue;
+		}
+		if (*path == '.' && *(path + 1) == '/') {
+			path += 2;
+			continue;
+		}
+		break;
+	}
+
+	return(path);
+}
+
+/************************************************************************
 Check if string ends with given suffix.
 @return true if string ends with given suffix. */
 static
@@ -3370,6 +3391,10 @@ backup_files(const char *from, bool prep_mode)
 		ibx_msg("rsync finished successfully.\n");
 
 		if (!prep_mode && !opt_ibx_no_lock) {
+			char path[FN_REFLEN];
+			char dst_path[FN_REFLEN];
+			char *newline;
+
 			/* Remove files that have been removed between first and
 			second passes. Cannot use "rsync --delete" because it
 			does not work with --files-from. */
@@ -3384,13 +3409,8 @@ backup_files(const char *from, bool prep_mode)
 				return(false);
 			}
 
-			while (!feof(rsync_tmpfile)) {
-				char path[FN_REFLEN];
-				char dst_path[FN_REFLEN];
-				char *newline;
+			while (fgets(path, sizeof(path), rsync_tmpfile)) {
 
-				ut_a(fgets(path, sizeof(path), rsync_tmpfile)
-						!= NULL);
 				newline = strchr(path, '\n');
 				if (newline) {
 					*newline = 0;
@@ -3701,9 +3721,9 @@ ibx_init()
 		xtrabackup_decrypt_decompress = TRUE;
 		xtrabackup_target_dir = ibx_position_arg;
 		run = "decrypt and decompress";
-	default:
-		run = "unknown";
 		break;
+	default:
+		ut_error;
 	}
 
 	ibx_msg("Starting the %s operation\n\n"
@@ -3847,8 +3867,10 @@ ibx_backup_finish()
 	/* Copy buffer pool dump or LRU dump */
 	if (!opt_ibx_rsync) {
 		if (buffer_pool_filename && file_exists(buffer_pool_filename)) {
-			copy_file(buffer_pool_filename,
-				    buffer_pool_filename, 0);
+			const char *dst_name;
+
+			dst_name = trim_root(buffer_pool_filename);
+			copy_file(buffer_pool_filename, dst_name, 0);
 		}
 		if (file_exists("ib_lru_dump")) {
 			copy_file("ib_lru_dump", "ib_lru_dump", 0);
@@ -3921,16 +3943,16 @@ ibx_copy_incremental_over_full()
 			}
 		}
 
-		/* copy buufer pool dump */
+		/* copy buffer pool dump */
 		if (innobase_buffer_pool_filename) {
-			if (*innobase_buffer_pool_filename == '/') {
-				strncpy(path, innobase_buffer_pool_filename,
-					sizeof(path));
-			} else {
-				snprintf(path, sizeof(path), "%s/%s",
-					xtrabackup_incremental_dir,
-					innobase_buffer_pool_filename);
-			}
+			const char *src_name;
+
+			src_name = trim_root(innobase_buffer_pool_filename);
+
+			snprintf(path, sizeof(path), "%s/%s",
+				xtrabackup_incremental_dir,
+				src_name);
+
 			if (file_exists(path)) {
 				copy_file(path, innobase_buffer_pool_filename,
 						0);
@@ -4133,7 +4155,7 @@ ibx_copy_back()
 
 	while (datadir_iter_next(it, &node)) {
 
-		/* skip empty directories in backup */
+		/* create empty directories */
 		if (node.is_empty_dir) {
 			char path[FN_REFLEN];
 
@@ -4169,6 +4191,35 @@ ibx_copy_back()
 		if (!(ret = copy_or_move_file(node.filepath,
 						node.filepath_rel, 1))) {
 			goto cleanup;
+		}
+	}
+
+	/* copy LRU dump if there is one */
+
+	if (file_exists("ib_lru_dump")) {
+		if (!(ret = copy_or_move_file(
+				"ib_lru_dump", "ib_lru_dump", 1))) {
+			goto cleanup;
+		}
+	}
+
+	/* copy buufer pool dump */
+
+	if (innobase_buffer_pool_filename) {
+		const char *src_name;
+		char path[FN_REFLEN];
+
+		src_name = trim_root(innobase_buffer_pool_filename);
+
+		snprintf(path, sizeof(path), "%s/%s",
+			mysql_data_home,
+			src_name);
+
+		/* could be already copied with other files
+		from data directory */
+		if (file_exists(src_name) &&
+			!file_exists(innobase_buffer_pool_filename)) {
+			copy_file(src_name, innobase_buffer_pool_filename, 0);
 		}
 	}
 
@@ -4295,9 +4346,9 @@ ibx_decrypt_decompress()
 	}
 
 	/* copy the rest of tablespaces */
-	ds_data = ds_create(mysql_data_home, DS_TYPE_LOCAL);
+	ds_data = ds_create("./", DS_TYPE_LOCAL);
 
-	it = datadir_iter_new(".", false);
+	it = datadir_iter_new("./", false);
 
 	ut_a(xtrabackup_parallel >= 0);
 
