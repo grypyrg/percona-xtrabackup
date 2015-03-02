@@ -26,6 +26,21 @@
 #define strmake_root xb_strmake_root
 #define memdup_root xb_memdup_root
 
+#define init_glob_errs xb_init_glob_errs
+#define get_global_errmsgs xb_get_global_errmsgs
+#define my_strerror xb_my_strerror
+#define my_get_err_msg xb_my_get_err_msg
+#define my_error xb_my_error
+#define my_printf_error xb_my_printf_error
+#define my_printv_error xb_my_printv_error
+#define my_error_register xb_my_error_register
+#define my_printf_warning xb_my_printf_warning
+#define my_error_unregister xb_my_error_unregister
+#define my_message xb_my_message
+#define my_message_stderr xb_my_message_stderr
+// #define my_init xb_my_init
+// #define my_end xb_my_end
+
 #include "my_global.h"                  /* C_MODE_START, C_MODE_END */
 
 C_MODE_START

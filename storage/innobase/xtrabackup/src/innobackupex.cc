@@ -1968,7 +1968,7 @@ ibx_mysql_connect()
 	MYSQL *connection = mysql_init(NULL);
 
 	if (connection == NULL) {
-		ibx_msg("Failed to connect to MySQL server: %s.\n",
+		ibx_msg("Failed to init MySQL struct: %s.\n",
 			mysql_error(connection));
 		return(NULL);
 	}
@@ -1980,8 +1980,8 @@ ibx_mysql_connect()
 
 	if (!mysql_real_connect(connection,
 				opt_ibx_host ? opt_ibx_host : "localhost",
-				opt_ibx_user ? opt_ibx_user : "",
-				opt_ibx_password ? opt_ibx_password : "",
+				opt_ibx_user,
+				opt_ibx_password,
 				"" /*database*/, opt_ibx_port,
 				opt_ibx_socket, 0)) {
 		ibx_msg("Failed to connect to MySQL server: %s.\n",
@@ -3719,6 +3719,8 @@ ibx_init()
 
 	if (ibx_mode == IBX_MODE_BACKUP) {
 
+		mysql_library_init(0, NULL, NULL);
+
 		if ((mysql_connection = ibx_mysql_connect()) == NULL) {
 			return(false);
 		}
@@ -3798,6 +3800,10 @@ ibx_cleanup()
 
 	if (mysql_connection) {
 		mysql_close(mysql_connection);
+	}
+
+	if (ibx_mode == IBX_MODE_BACKUP) {
+		mysql_library_end();
 	}
 }
 
