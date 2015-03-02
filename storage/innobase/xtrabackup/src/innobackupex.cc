@@ -4270,8 +4270,6 @@ ibx_copy_back()
 
 			ibfile = get_filename(srv_data_file_names[i]);
 
-			fprintf(stderr, "%s == %s\n", ibfile, filename);
-
 			if (strcmp(ibfile, filename) == 0) {
 				is_ibdata_file = true;
 				continue;
@@ -4283,15 +4281,6 @@ ibx_copy_back()
 
 		if (!(ret = copy_or_move_file(node.filepath,
 						node.filepath_rel, 1))) {
-			goto cleanup;
-		}
-	}
-
-	/* copy LRU dump if there is one */
-
-	if (file_exists("ib_lru_dump")) {
-		if (!(ret = copy_or_move_file(
-				"ib_lru_dump", "ib_lru_dump", 1))) {
 			goto cleanup;
 		}
 	}
