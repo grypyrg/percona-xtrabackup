@@ -34,7 +34,6 @@ INCLUDE_DIRECTORIES(
   ${GCRYPT_INCLUDE_DIR}
   ${CURL_INCLUDE_DIRS}
   ${LIBEV_INCLUDE_DIRS}
-  ${MYSQL_INCLUDE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
   )
 
@@ -43,6 +42,8 @@ INCLUDE_DIRECTORIES(
 ########################################################################
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/xtrabackup_version.h )
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/mysql_h_sys.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/mysql_h_sys.h )
 
 
 MYSQL_ADD_EXECUTABLE(xtrabackup
