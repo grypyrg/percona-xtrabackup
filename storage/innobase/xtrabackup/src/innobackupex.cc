@@ -2841,9 +2841,7 @@ write_galera_info(MYSQL *connection)
 
 	mysql_variable status[] = {
 		{"Wsrep_local_state_uuid", &state_uuid},
-		{"wsrep_local_state_uuid", &state_uuid},
 		{"Wsrep_last_committed", &last_committed},
-		{"wsrep_last_committed", &last_committed},
 		{NULL, NULL}
 	};
 
