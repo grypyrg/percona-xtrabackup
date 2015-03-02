@@ -219,6 +219,15 @@ static inline int ibx_msg(const char *fmt, ...)
 }
 
 /************************************************************************
+Retirn true if character if file separator */
+static
+bool
+is_path_separator(char c)
+{
+	return(c == FN_LIBCHAR || c == FN_LIBCHAR2);
+}
+
+/************************************************************************
 Check to see if a file exists.
 Takes name of the file to check.
 @return true if file exists. */
@@ -243,11 +252,11 @@ const char *
 trim_root(const char *path)
 {
 	while (*path) {
-		if (*path == '/') {
+		if (is_path_separator(*path)) {
 			++path;
 			continue;
 		}
-		if (*path == '.' && *(path + 1) == '/') {
+		if (*path == '.' && is_path_separator(path[1])) {
 			path += 2;
 			continue;
 		}
@@ -256,6 +265,25 @@ trim_root(const char *path)
 
 	return(path);
 }
+
+/************************************************************************
+Return pointer to a file name part of a given path */
+static
+const char *
+get_filename(const char *path)
+{
+	const char *ptr;
+
+	for (ptr = path; *ptr; ++ptr) {
+		if (is_path_separator(*ptr)) {
+			path = ptr + 1;
+		}
+	}
+
+	return(path);
+}
+
+
 
 /************************************************************************
 Check if string ends with given suffix.
@@ -281,25 +309,43 @@ mkdirp(const char *pathname, int Flags, myf MyFlags)
 	/* make a parent directory path */
 	strncpy(parent, pathname, sizeof(parent));
 	parent[sizeof(parent) - 1] = 0;
-	for(p = parent + strlen(parent); *p != '/' && p != parent; p--);
+
+	for (p = parent + strlen(parent);
+	    !is_path_separator(*p) && p != parent; p--);
+
 	*p = 0;
 
 	/* try to make parent directory */
-	if(p != parent && mkdirp(parent, Flags, MyFlags) != 0) {
+	if (p != parent && mkdirp(parent, Flags, MyFlags) != 0) {
 		return(-1);
 	}
 
 	/* make this one if parent has been made */
-	if(my_mkdir(pathname, Flags, MyFlags) == 0) {
+	if (my_mkdir(pathname, Flags, MyFlags) == 0) {
 		return(0);
 	}
 
 	/* if it already exists that is fine */
-	if(errno == EEXIST) {
+	if (errno == EEXIST) {
 		return(0);
 	}
 
 	return(-1);
+}
+
+/************************************************************************
+Return true if first and second arguments are the same path. */
+static
+bool
+equal_paths(const char *first, const char *second)
+{
+	char real_first[PATH_MAX];
+	char real_second[PATH_MAX];
+
+	ut_a(realpath(first, real_first) != NULL);
+	ut_a(realpath(second, real_second) != NULL);
+
+	return (strcmp(real_first, real_second) == 0);
 }
 
 /************************************************************************
@@ -565,7 +611,7 @@ datadir_iter_next_file(datadir_iter_t *it)
 		srv_normalize_path_for_win(it->filepath);
 
 		make_path_n(1, &it->filepath_rel, &it->filepath_rel_len,
-				it->fileinfo.name);
+				it->dbinfo.name);
 
 		it->is_empty_dir = false;
 		it->is_file = false;
@@ -2180,18 +2226,12 @@ get_mysql_vars(MYSQL *connection)
 
 	/* make sure datadir value is the same in configuration file */
 	if (mysql_data_home != NULL && datadir_var != NULL) {
-		char real_data_home[PATH_MAX];
-		char real_datadir[PATH_MAX];
-
-		ut_a(realpath(mysql_data_home, real_data_home) != NULL);
-		ut_a(realpath(datadir_var, real_datadir) != NULL);
-
-		if (!(ret = strcmp(real_data_home, real_datadir) == 0)) {
+		if (!(ret = equal_paths(mysql_data_home, datadir_var))) {
 			ibx_msg("Error: option 'datadir' has different "
 				"values:\n"
 				"  '%s' in defaults file\n"
 				"  '%s' in SHOW VARIABLES\n",
-				real_data_home, real_datadir);
+				mysql_data_home, datadir_var);
 			goto out;
 		}
 	}
@@ -3667,7 +3707,7 @@ ibx_init()
 	}
 
 	if (opt_ibx_databases != NULL) {
-		if (*opt_ibx_databases == '/') {
+		if (is_path_separator(*opt_ibx_databases)) {
 			xtrabackup_databases_file = opt_ibx_databases;
 		} else {
 			xtrabackup_databases = opt_ibx_databases;
@@ -4151,12 +4191,9 @@ ibx_copy_back()
 			DS_TYPE_LOCAL);
 
 	for (i = 0; i < srv_n_data_files; i++) {
-		char *basename = strrchr(srv_data_file_names[i], '/');
+		const char *filename = get_filename(srv_data_file_names[i]);
 
-		basename = (basename != NULL ?
-				basename + 1 : srv_data_file_names[i]);
-
-		if (!(ret = copy_or_move_file(basename,
+		if (!(ret = copy_or_move_file(filename,
 						srv_data_file_names[i], 1))) {
 			goto cleanup;
 		}
@@ -4168,11 +4205,19 @@ ibx_copy_back()
 	/* copy the rest of tablespaces */
 	ds_data = ds_create(mysql_data_home, DS_TYPE_LOCAL);
 
-	it = datadir_iter_new(".");
+	it = datadir_iter_new(".", false);
 
 	datadir_node_init(&node);
 
 	while (datadir_iter_next(it, &node)) {
+		const char *ext_list[] = {"backup-my.cnf", "xtrabackup_logfile",
+			"xtrabackup_binary", "xtrabackup_binlog_info",
+			"xtrabackup_checkpoints", ".qp", ".pmap", ".tmp",
+			".xbcrypt", NULL};
+		const char *filename;
+		char c_tmp;
+		int i_tmp;
+		bool is_ibdata_file;
 
 		/* create empty directories */
 		if (node.is_empty_dir) {
@@ -4201,9 +4246,38 @@ ibx_copy_back()
 			continue;
 		}
 
+		filename = get_filename(node.filepath);
+
 		/* skip .qp and .xbcrypt files */
-		if (ends_with(node.filepath, ".qp")
-			|| ends_with(node.filepath, ".xbcrypt")) {
+		if (filename_matches(filename, ext_list)) {
+			continue;
+		}
+
+		/* skip undo tablespaces */
+		if (sscanf(filename, "undo%d%c", &i_tmp, &c_tmp) == 1) {
+			continue;
+		}
+
+		/* skip redo logs */
+		if (sscanf(filename, "ib_logfile%d%c", &i_tmp, &c_tmp) == 1) {
+			continue;
+		}
+
+		/* skip innodb data files */
+		is_ibdata_file = false;
+		for (i = 0; i < srv_n_data_files; i++) {
+			const char *ibfile;
+
+			ibfile = get_filename(srv_data_file_names[i]);
+
+			fprintf(stderr, "%s == %s\n", ibfile, filename);
+
+			if (strcmp(ibfile, filename) == 0) {
+				is_ibdata_file = true;
+				continue;
+			}
+		}
+		if (is_ibdata_file) {
 			continue;
 		}
 
@@ -4372,9 +4446,9 @@ ibx_decrypt_decompress()
 	}
 
 	/* copy the rest of tablespaces */
-	ds_data = ds_create("./", DS_TYPE_LOCAL);
+	ds_data = ds_create(".", DS_TYPE_LOCAL);
 
-	it = datadir_iter_new("./", false);
+	it = datadir_iter_new(".", false);
 
 	ut_a(xtrabackup_parallel >= 0);
 
