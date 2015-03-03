@@ -33,7 +33,7 @@ mysql_mutex_t THR_LOCK_malloc, THR_LOCK_open,
               THR_LOCK_myisam_mmap;
 
 mysql_cond_t  THR_COND_threads;
-uint            THR_thread_count= 0;
+static uint            THR_thread_count= 0;
 uint 		my_thread_end_wait_time= 5;
 #if !defined(HAVE_LOCALTIME_R) || !defined(HAVE_GMTIME_R)
 mysql_mutex_t LOCK_localtime_r;
