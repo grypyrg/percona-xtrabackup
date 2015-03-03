@@ -318,6 +318,7 @@ extern CHARSET_INFO compiled_charsets[];
 /* statistics */
 extern ulong	my_file_opened,my_stream_opened, my_tmp_file_created;
 extern ulong    my_file_total_opened;
+#define my_init_done xb_my_init_done
 extern my_bool	my_init_done;
 
 					/* Point to current my_message() */

@@ -37,8 +37,6 @@ static my_bool win32_init_tcp_ip();
 #define SCALE_SEC       100
 #define SCALE_USEC      10000
 
-#define my_init_done xb_my_init_done
-
 my_bool my_init_done= 0;
 ulong   my_thread_stack_size= 65536;
 
