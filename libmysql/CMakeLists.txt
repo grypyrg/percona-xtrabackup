@@ -131,7 +131,7 @@ mysql_server_end
 mysql_set_character_set
 mysql_get_character_set_info
 mysql_stmt_next_result
-my_init
+xb_my_init
 mysql_client_find_plugin
 mysql_client_register_plugin
 mysql_load_plugin

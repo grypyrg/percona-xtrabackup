@@ -22,6 +22,9 @@
 #include <m_string.h>
 #include <signal.h>
 
+#define THR_KEY_mysys xb_THR_KEY_mysys
+#define THR_KEY_mysys_initialized xb_THR_KEY_mysys_initialized
+
 pthread_key(struct st_my_thread_var*, THR_KEY_mysys);
 my_bool THR_KEY_mysys_initialized= FALSE;
 mysql_mutex_t THR_LOCK_malloc, THR_LOCK_open,
