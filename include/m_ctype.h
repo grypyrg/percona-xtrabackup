@@ -664,6 +664,88 @@ extern CHARSET_INFO my_charset_utf8mb4_unicode_ci;
 
 
 /* declarations for simple charsets */
+#define my_strnxfrm_simple xb_my_strnxfrm_simple
+#define my_strnxfrmlen_simple xb_my_strnxfrmlen_simple
+#define my_strnncoll_simple xb_my_strnncoll_simple
+#define my_strnncollsp_simple xb_my_strnncollsp_simple
+#define my_hash_sort_simple xb_my_hash_sort_simple
+#define my_lengthsp_8bit xb_my_lengthsp_8bit
+#define my_instr_simple xb_my_instr_simple
+#define my_caseup_str_8bit xb_my_caseup_str_8bit
+#define my_casedn_str_8bit xb_my_casedn_str_8bit
+#define my_caseup_8bit xb_my_caseup_8bit
+#define my_casedn_8bit xb_my_casedn_8bit
+#define my_strcasecmp_8bit xb_my_strcasecmp_8bit
+#define my_mb_wc_8bit xb_my_mb_wc_8bit
+#define my_wc_mb_8bit xb_my_wc_mb_8bit
+#define my_mb_ctype_8bit xb_my_mb_ctype_8bit
+#define my_mb_ctype_mb xb_my_mb_ctype_mb
+#define my_scan_8bit xb_my_scan_8bit
+#define my_snprintf_8bit xb_my_snprintf_8bit
+#define my_strntol_8bit xb_my_strntol_8bit
+#define my_strntoul_8bit xb_my_strntoul_8bit
+#define my_strntoll_8bit xb_my_strntoll_8bit
+#define my_strntoull_8bit xb_my_strntoull_8bit
+#define my_strntod_8bit xb_my_strntod_8bit
+#define my_long10_to_str_8bit xb_my_long10_to_str_8bit
+#define my_longlong10_to_str_8bit xb_my_longlong10_to_str_8bit
+#define my_strtoll10_8bit xb_my_strtoll10_8bit
+#define my_strtoll10_ucs2 xb_my_strtoll10_ucs2
+#define my_strntoull10rnd_8bit xb_my_strntoull10rnd_8bit
+#define my_strntoull10rnd_ucs2 xb_my_strntoull10rnd_ucs2
+#define my_fill_8bit xb_my_fill_8bit
+#define my_like_range_simple xb_my_like_range_simple
+#define my_like_range_mb xb_my_like_range_mb
+#define my_like_range_generic xb_my_like_range_generic
+#define my_wildcmp_8bit xb_my_wildcmp_8bit
+#define my_wildcmp_bin xb_my_wildcmp_bin
+#define my_numchars_8bit xb_my_numchars_8bit
+#define my_numcells_8bit xb_my_numcells_8bit
+#define my_charpos_8bit xb_my_charpos_8bit
+#define my_well_formed_len_8bit xb_my_well_formed_len_8bit
+#define my_mbcharlen_8bit xb_my_mbcharlen_8bit
+#define my_caseup_str_mb xb_my_caseup_str_mb
+#define my_casedn_str_mb xb_my_casedn_str_mb
+#define my_caseup_mb xb_my_caseup_mb
+#define my_casedn_mb xb_my_casedn_mb
+#define my_caseup_mb_varlen xb_my_caseup_mb_varlen
+#define my_casedn_mb_varlen xb_my_casedn_mb_varlen
+#define my_caseup_ujis xb_my_caseup_ujis
+#define my_casedn_ujis xb_my_casedn_ujis
+#define my_strcasecmp_mb xb_my_strcasecmp_mb
+#define my_wildcmp_mb xb_my_wildcmp_mb
+#define my_numchars_mb xb_my_numchars_mb
+#define my_numcells_mb xb_my_numcells_mb
+#define my_charpos_mb xb_my_charpos_mb
+#define my_well_formed_len_mb xb_my_well_formed_len_mb
+#define my_instr_mb xb_my_instr_mb
+#define my_strnncoll_mb_bin xb_my_strnncoll_mb_bin
+#define my_strnncollsp_mb_bin xb_my_strnncollsp_mb_bin
+#define my_wildcmp_mb_bin xb_my_wildcmp_mb_bin
+#define my_strcasecmp_mb_bin xb_my_strcasecmp_mb_bin
+#define my_hash_sort_mb_bin xb_my_hash_sort_mb_bin
+#define my_strnxfrm_mb xb_my_strnxfrm_mb
+#define my_strnxfrm_unicode xb_my_strnxfrm_unicode
+#define my_strnxfrm_unicode_full_bin xb_my_strnxfrm_unicode_full_bin
+#define my_strnxfrmlen_unicode_full_bin xb_my_strnxfrmlen_unicode_full_bin
+#define my_wildcmp_unicode xb_my_wildcmp_unicode
+#define my_parse_charset_xml xb_my_parse_charset_xml
+#define my_strchr xb_my_strchr
+#define my_strcspn xb_my_strcspn
+#define my_propagate_simple xb_my_propagate_simple
+#define my_propagate_complex xb_my_propagate_complex
+#define my_string_repertoire xb_my_string_repertoire
+#define my_charset_is_ascii_based xb_my_charset_is_ascii_based
+#define my_charset_is_8bit_pure_ascii xb_my_charset_is_8bit_pure_ascii
+#define my_charset_repertoire xb_my_charset_repertoire
+#define my_strxfrm_flag_normalize xb_my_strxfrm_flag_normalize
+#define my_strxfrm_desc_and_reverse xb_my_strxfrm_desc_and_reverse
+#define my_strxfrm_pad_desc_and_reverse xb_my_strxfrm_pad_desc_and_reverse
+#define my_charset_is_ascii_compatible xb_my_charset_is_ascii_compatible
+#define my_CONTRACTIONS *my_charset_get_contractions my_CONTRACTIONS *xb_my_charset_get_contractions
+#define my_vsnprintf_ex xb_my_vsnprintf_ex
+#define my_convert xb_my_convert
+
 extern size_t my_strnxfrm_simple(const CHARSET_INFO *,
                                  uchar *dst, size_t dstlen, uint nweights,
                                  const uchar *src, size_t srclen, uint flags);
