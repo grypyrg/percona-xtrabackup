@@ -34,7 +34,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <algorithm>
 #include <map>
 #include <string>
-#include <stdint.h>
 #include <jsmn.h>
 #include "xbstream.h"
 
@@ -235,7 +234,7 @@ static struct my_option my_long_options[] =
 	{0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}
 };
 
-static map<string, uint64_t> file_chunk_count;
+static map<string, ulonglong> file_chunk_count;
 
 static
 slo_manifest *slo_manifest_init()
