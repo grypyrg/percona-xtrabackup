@@ -45,6 +45,10 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/mysql_h_sys.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/mysql_h_sys.h )
 
+EXECUTE_PROCESS(COMMAND xxd --include version_check.pl
+                ${CMAKE_CURRENT_BINARY_DIR}/version_check_pl.h
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 
 MYSQL_ADD_EXECUTABLE(xtrabackup
   xtrabackup.cc
@@ -83,10 +87,6 @@ TARGET_LINK_LIBRARIES(xtrabackup
 ########################################################################
 # innobackupex binary
 ########################################################################
-CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
-               ${CMAKE_CURRENT_BINARY_DIR}/xtrabackup_version.h )
-
-
 MYSQL_ADD_EXECUTABLE(innobackupex
   xtrabackup.cc
   innobackupex.cc

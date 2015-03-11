@@ -61,6 +61,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string>
 #include <sstream>
 #include <set>
+#include <version_check_pl.h>
 #include "common.h"
 #include "innobackupex.h"
 #include "xtrabackup.h"
@@ -102,6 +103,7 @@ my_bool opt_ibx_safe_slave_backup = FALSE;
 my_bool opt_ibx_rsync = FALSE;
 my_bool opt_ibx_force_non_empty_dirs = FALSE;
 my_bool opt_ibx_notimestamp = FALSE;
+my_bool opt_ibx_noversioncheck = FALSE;
 my_bool opt_ibx_no_backup_locks = FALSE;
 my_bool opt_ibx_decompress = FALSE;
 
@@ -1263,6 +1265,7 @@ enum innobackupex_options
 	OPT_INCLUDE,
 	OPT_FORCE_NON_EMPTY_DIRS,
 	OPT_NO_TIMESTAMP,
+	OPT_NO_VERSION_CHECK,
 	OPT_NO_BACKUP_LOCKS,
 	OPT_DATABASES,
 	OPT_DECRYPT,
@@ -1415,6 +1418,12 @@ static struct my_option ibx_long_options[] =
 	 "BACKUP-ROOT-DIR instead.",
 	 (uchar *) &opt_ibx_notimestamp,
 	 (uchar *) &opt_ibx_notimestamp,
+	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+	{"no-version-check", OPT_NO_VERSION_CHECK, "This option disables the "
+	 "version check which is enabled by the --version-check option.",
+	 (uchar *) &opt_ibx_noversioncheck,
+	 (uchar *) &opt_ibx_noversioncheck,
 	 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 
 	{"no-backup-locks", OPT_NO_BACKUP_LOCKS, "This option controls if "
@@ -3831,9 +3840,44 @@ ibx_flush_changed_page_bitmaps()
 	return(true);
 }
 
+void
+version_check()
+{
+	if (opt_ibx_password != NULL) {
+		setenv("option_mysql_password", opt_ibx_password, 1);
+	}
+	if (opt_ibx_user != NULL) {
+		setenv("option_mysql_user", opt_ibx_user, 1);
+	}
+	if (opt_ibx_host != NULL) {
+		setenv("option_mysql_host", opt_ibx_host, 1);
+	}
+	if (opt_ibx_socket != NULL) {
+		setenv("option_mysql_socket", opt_ibx_socket, 1);
+	}
+	if (opt_ibx_port != 0) {
+		char port[20];
+		snprintf(port, sizeof(port), "%u", opt_ibx_port);
+		setenv("option_mysql_port", port, 1);
+	}
+
+	FILE *pipe = popen("perl", "w");
+	if (pipe == NULL) {
+		return;
+	}
+
+	fputs((const char *)version_check_pl, pipe);
+
+	pclose(pipe);
+}
+
 bool
 ibx_backup_start()
 {
+	if (!opt_ibx_noversioncheck) {
+		version_check();
+	}
+
 	if (!opt_ibx_no_lock) {
 		if (opt_ibx_safe_slave_backup) {
 			if (!wait_for_safe_slave(mysql_connection)) {
