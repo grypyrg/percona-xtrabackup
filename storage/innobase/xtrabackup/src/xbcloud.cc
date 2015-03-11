@@ -44,8 +44,8 @@ using std::string;
 
 #define XBCLOUD_VERSION "1.0"
 
-#define SWIFT_MAX_URL_SIZE 2048
-#define SWIFT_MAX_HDR_SIZE 2048
+#define SWIFT_MAX_URL_SIZE 8192
+#define SWIFT_MAX_HDR_SIZE 8192
 
 #define SWIFT_CHUNK_SIZE 10485760
 
@@ -153,10 +153,21 @@ const char *storage_names[] =
 
 static my_bool opt_verbose = 0;
 static ulong opt_storage = SWIFT;
-static const char *opt_user = NULL; 
-static const char *opt_container = NULL;
-static const char *opt_url = NULL;
-static const char *opt_key = NULL;
+static const char *opt_swift_user = NULL; 
+static const char *opt_swift_user_id = NULL; 
+static const char *opt_swift_password = NULL; 
+static const char *opt_swift_tenant = NULL; 
+static const char *opt_swift_tenant_id = NULL; 
+static const char *opt_swift_project = NULL; 
+static const char *opt_swift_project_id = NULL; 
+static const char *opt_swift_domain = NULL; 
+static const char *opt_swift_domain_id = NULL; 
+static const char *opt_swift_region = NULL; 
+static const char *opt_swift_container = NULL;
+static const char *opt_swift_storage_url = NULL;
+static const char *opt_swift_url = NULL;
+static const char *opt_swift_key = NULL;
+static const char *opt_swift_auth_version = NULL;
 static const char *opt_name = NULL;
 static const char *opt_cacert = NULL;
 static ulong opt_parallel = 1;
@@ -175,6 +186,17 @@ enum {
 	OPT_SWIFT_URL,
 	OPT_SWIFT_KEY,
 	OPT_SWIFT_USER,
+	OPT_SWIFT_USER_ID,
+	OPT_SWIFT_PASSWORD,
+	OPT_SWIFT_TENANT,
+	OPT_SWIFT_TENANT_ID,
+	OPT_SWIFT_PROJECT,
+	OPT_SWIFT_PROJECT_ID,
+	OPT_SWIFT_DOMAIN,
+	OPT_SWIFT_DOMAIN_ID,
+	OPT_SWIFT_REGION,
+	OPT_SWIFT_STORAGE_URL,
+	OPT_SWIFT_AUTH_VERSION,
 	OPT_PARALLEL,
 	OPT_CACERT,
 	OPT_INSECURE,
@@ -191,24 +213,90 @@ static struct my_option my_long_options[] =
 	 &opt_storage, &opt_storage, &storage_typelib,
 	 GET_ENUM, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 
+	{"swift-auth-version", OPT_SWIFT_AUTH_VERSION,
+	 "Swift authentication verison to use.",
+	 &opt_swift_auth_version, &opt_swift_auth_version, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
 	{"swift-container", OPT_SWIFT_CONTAINER,
-	 "Swift container.",
-	 &opt_container, &opt_container, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 "Swift container to store backups into.",
+	 &opt_swift_container, &opt_swift_container, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
 
 	{"swift-user", OPT_SWIFT_USER,
-	 "Swift user.",
-	 &opt_user, &opt_user, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 "Swift user name.",
+	 &opt_swift_user, &opt_swift_user, 0, GET_STR_ALLOC, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
 
-	{"swift-url", OPT_SWIFT_USER,
-	 "Swift URL.",
-	 &opt_url, &opt_url, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	{"swift-user-id", OPT_SWIFT_USER_ID,
+	 "Swift user ID.",
+	 &opt_swift_user_id, &opt_swift_user_id, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-url", OPT_SWIFT_URL,
+	 "Base URL of SWIFT authentication service.",
+	 &opt_swift_url, &opt_swift_url, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-storage-url", OPT_SWIFT_STORAGE_URL,
+	 "URL of object-store endpoint. Usually received from authentication "
+	 "service. Specify to override this value.",
+	 &opt_swift_storage_url, &opt_swift_storage_url, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
 
 	{"swift-key", OPT_SWIFT_KEY,
 	 "Swift key.",
-	 &opt_key, &opt_key, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 &opt_swift_key, &opt_swift_key, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-tenant", OPT_SWIFT_TENANT,
+	 "The tenant name. Both the --swift-tenant and --swift-tenant-id "
+	 "options are optional, but should not be specified together.",
+	 &opt_swift_tenant, &opt_swift_tenant, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-tenant-id", OPT_SWIFT_TENANT_ID,
+	 "The tenant ID. Both the --swift-tenant and --swift-tenant-id "
+	 "options are optional, but should not be specified together.",
+	 &opt_swift_tenant_id, &opt_swift_tenant_id, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-project", OPT_SWIFT_PROJECT,
+	 "The project name.",
+	 &opt_swift_project, &opt_swift_project, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-project-id", OPT_SWIFT_PROJECT_ID,
+	 "The project ID.",
+	 &opt_swift_project_id, &opt_swift_project_id, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-domain", OPT_SWIFT_DOMAIN,
+	 "The domain name.",
+	 &opt_swift_domain, &opt_swift_domain, 0, GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-domain-id", OPT_SWIFT_DOMAIN_ID,
+	 "The domain ID.",
+	 &opt_swift_domain_id, &opt_swift_domain_id, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-password", OPT_SWIFT_PASSWORD,
+	 "The password of the user.",
+	 &opt_swift_password, &opt_swift_password, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
+	 0, 0, 0, 0, 0, 0},
+
+	{"swift-region", OPT_SWIFT_REGION,
+	 "The region object-store endpoint.",
+	 &opt_swift_region, &opt_swift_region, 0,
+	 GET_STR_ALLOC, REQUIRED_ARG,
 	 0, 0, 0, 0, 0, 0},
 
 	{"parallel", OPT_PARALLEL,
@@ -359,21 +447,17 @@ int parse_args(int argc, char **argv)
 
 	/* validate arguments */
 	if (opt_storage == SWIFT) {
-		if (opt_user == NULL) {
+		if (opt_swift_user == NULL) {
 			fprintf(stderr, "user for Swift is not specified\n");
 			exit(EXIT_FAILURE);
 		}
-		if (opt_container == NULL) {
+		if (opt_swift_container == NULL) {
 			fprintf(stderr,
 				"container for Swift is not specified\n");
 			exit(EXIT_FAILURE);
 		}
-		if (opt_url == NULL) {
+		if (opt_swift_url == NULL) {
 			fprintf(stderr, "URL for Swift is not specified\n");
-			exit(EXIT_FAILURE);
-		}
-		if (opt_key == NULL) {
-			fprintf(stderr, "key for Swift is not specified\n");
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -439,10 +523,13 @@ size_t swift_auth_header_read_cb(char *ptr, size_t size, size_t nmemb,
 	return nmemb * size;
 }
 
+/*********************************************************************//**
+Authenticate against Swift TempAuth. Fills swift_auth_info struct.
+Uses creadentials privided as global variables.
+@returns true if access is granted and token received. */
 static
-int
-swift_auth(const char *auth_url, const char *username, const char *key,
-	   swift_auth_info *info)
+bool
+swift_temp_auth(const char *auth_url, swift_auth_info *info)
 {
 	CURL *curl;
 	CURLcode res;
@@ -450,22 +537,32 @@ swift_auth(const char *auth_url, const char *username, const char *key,
 	char *hdr_buf = NULL;
 	struct curl_slist *slist = NULL;
 
+	if (opt_swift_user == NULL) {
+		fprintf(stderr, "Swift user must be specified for TempAuth.\n");
+		return(false);
+	}
+
+	if (opt_swift_key == NULL) {
+		fprintf(stderr, "Swift key must be specified for TempAuth.\n");
+		return(false);
+	}
+
 	curl = curl_easy_init();
 
 	if (curl != NULL) {
 
-		hdr_buf = (char *)(calloc(14 + max(strlen(username),
-						   strlen(key)), 1));
+		hdr_buf = (char *)(calloc(14 + max(strlen(opt_swift_user),
+						   strlen(opt_swift_key)), 1));
 
 		if (!hdr_buf) {
 			res = CURLE_FAILED_INIT;
 			goto cleanup;
 		}
 
-		sprintf(hdr_buf, "X-Auth-User: %s", username);
+		sprintf(hdr_buf, "X-Auth-User: %s", opt_swift_user);
 		slist = curl_slist_append(slist, hdr_buf);
 
-		sprintf(hdr_buf, "X-Auth-Key: %s", key);
+		sprintf(hdr_buf, "X-Auth-Key: %s", opt_swift_key);
 		slist = curl_slist_append(slist, hdr_buf);
 
 		curl_easy_setopt(curl, CURLOPT_VERBOSE, opt_verbose);
@@ -509,7 +606,22 @@ cleanup:
 	if (curl)
 		curl_easy_cleanup(curl);
 
-	return res;
+	if (res == CURLE_OK) {
+		/* check that we received token and storage URL */
+		if (*info->url == 0) {
+			fprintf(stderr, "error: malformed response: "
+					"X-Storage-Url is missing\n");
+			return(false);
+		}
+		if (*info->token == 0) {
+			fprintf(stderr, "error: malformed response: "
+					"X-Auth-Token is missing\n");
+			return(false);
+		}
+		return(true);
+	}
+
+	return(false);
 }
 
 static
@@ -1311,7 +1423,7 @@ swift_fetch_into_buffer(swift_auth_info *auth, const char *url,
 			goto cleanup;
 		}
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-		if (http_code != 200) {
+		if (http_code < 200 || http_code >= 300) {
 			fprintf(stderr, "error: request failed "
 				"with response code: %ld\n", http_code);
 			res = CURLE_LOGIN_DENIED;
@@ -1399,6 +1511,8 @@ json_token_eq(const char *buf, jsmntok_t *t, const char *s)
 {
 	size_t len = strlen(s);
 
+	assert(t->end > t->start);
+
 	return((size_t)(t->end - t->start) == len &&
 		(strncmp(buf + t->start, s, len) == 0));
 }
@@ -1407,8 +1521,10 @@ static
 bool
 json_token_str(const char *buf, jsmntok_t *t, char *out, int out_size)
 {
-	memcpy(out, buf + t->start, min(t->end - t->start, out_size - 1));
-	out[min(t->end - t->start, out_size - 1)] = 0;
+	size_t len = min(t->end - t->start, out_size - 1);
+
+	memcpy(out, buf + t->start, len);
+	out[len] = 0;
 
 	return(true);
 }
@@ -1450,7 +1566,7 @@ swift_parse_container_list(container_list *list)
 	int object_idx = 0;
 
 	if (tokens[0].type != JSMN_ARRAY) {
-		fprintf(stderr, "error: mallformed response "
+		fprintf(stderr, "error: malformed response "
 				"(array expected)\n");
 		return(false);
 	}
@@ -1459,7 +1575,7 @@ swift_parse_container_list(container_list *list)
 		jsmntok_t *t = &tokens[i];
 
 		if (t->type != JSMN_OBJECT) {
-			fprintf(stderr, "error: mallformed response "
+			fprintf(stderr, "error: malformed response "
 					"(object expected)\n");
 			return(false);
 		}
@@ -1468,13 +1584,13 @@ swift_parse_container_list(container_list *list)
 			jsmntok_t *key = &tokens[j];
 			jsmntok_t *val = &tokens[j + 1];
 			if (key->type != JSMN_STRING) {
-				fprintf(stderr, "error: mallformed response "
+				fprintf(stderr, "error: malformed response "
 						"(string expected)\n");
 				return(false);
 			}
 			if (json_token_eq(list->content_json, key, "hash")) {
 				if (val->end - val->start != 32) {
-					fprintf(stderr, "error: mallformed "
+					fprintf(stderr, "error: malformed "
 							"response "
 							"(hash must be 32 "
 							"chars long)\n");
@@ -1618,6 +1734,566 @@ int swift_download(swift_auth_info *auth, const char *container,
 	return(CURLE_OK);
 }
 
+/*********************************************************************//**
+Fills auth_info with response from keystone response.
+@return	true is response parsed successfully */
+static
+bool
+swift_parse_keystone_response_v2(char *response, size_t response_length,
+				swift_auth_info *auth_info)
+{
+	enum {MAX_DEPTH=20};
+	enum label_t {NONE, ACCESS, CATALOG, ENDPOINTS, TOKEN};
+
+	char filtered_url[SWIFT_MAX_URL_SIZE];
+	char public_url[SWIFT_MAX_URL_SIZE];
+	char region[SWIFT_MAX_URL_SIZE];
+	char id[SWIFT_MAX_URL_SIZE];
+	char token_id[SWIFT_MAX_URL_SIZE];
+	char type[SWIFT_MAX_URL_SIZE];
+
+	struct stack_t {
+		jsmntok_t *t;
+		int n_items;
+		label_t label;
+	};
+
+	stack_t stack[MAX_DEPTH];
+	jsmntok_t *tokens;
+	int level;
+
+	tokens = json_tokenise(response, response_length, 200);
+
+	stack[0].t = &tokens[0];
+	stack[0].label = NONE;
+	stack[0].n_items = 1;
+	level = 0;
+
+	for (size_t i = 0, j = 1; j > 0; i++, j--) {
+		jsmntok_t *t = &tokens[i];
+
+		assert(t->start != -1 && t->end != -1);
+		assert(level >= 0);
+
+		--stack[level].n_items;
+
+		switch (t->type) {
+		case JSMN_ARRAY:
+		case JSMN_OBJECT:
+			if (level < MAX_DEPTH - 1) {
+				level++;
+			}
+			stack[level].t = t;
+			stack[level].label = NONE;
+			if (t->type == JSMN_ARRAY) {
+				stack[level].n_items = t->size;
+				j += t->size;
+			} else {
+				stack[level].n_items = t->size * 2;
+				j += t->size * 2;
+			}
+			break;
+		case JSMN_PRIMITIVE:
+		case JSMN_STRING:
+			if (stack[level].t->type == JSMN_OBJECT &&
+			    stack[level].n_items % 2 == 1) {
+				/* key */
+				if (json_token_eq(response, t, "access")) {
+					stack[level].label = ACCESS;
+				}
+				if (json_token_eq(response, t,
+							"serviceCatalog")) {
+					stack[level].label = CATALOG;
+				}
+				if (json_token_eq(response, t, "endpoints")) {
+					stack[level].label = ENDPOINTS;
+				}
+				if (json_token_eq(response, t, "token")) {
+					stack[level].label = TOKEN;
+				}
+				if (json_token_eq(response, t, "id")) {
+					json_token_str(response, &tokens[i + 1],
+							id, sizeof(id));
+				}
+				if (json_token_eq(response, t, "id")
+				    && stack[level - 1].label == TOKEN) {
+					json_token_str(response, &tokens[i + 1],
+						token_id, sizeof(token_id));
+				}
+				if (json_token_eq(response, t, "region")) {
+					json_token_str(response, &tokens[i + 1],
+						region, sizeof(region));
+				}
+				if (json_token_eq(response, t, "publicURL")) {
+					json_token_str(response, &tokens[i + 1],
+						public_url, sizeof(public_url));
+				}
+				if (json_token_eq(response, t, "type")) {
+					json_token_str(response, &tokens[i + 1],
+						type, sizeof(type));
+				}
+			}
+			break;
+		}
+
+		while (stack[level].n_items == 0 && level > 0) {
+			if (stack[level].t->type == JSMN_OBJECT
+			    && level == 6
+			    && stack[level - 1].t->type == JSMN_ARRAY
+			    && stack[level - 2].label == ENDPOINTS) {
+				if (opt_swift_region == NULL
+				    || strcmp(opt_swift_region, region) == 0) {
+					strncpy(filtered_url, public_url,
+						sizeof(filtered_url));
+				}
+			}
+			if (stack[level].t->type == JSMN_OBJECT &&
+				level == 4 &&
+				stack[level - 1].t->type == JSMN_ARRAY &&
+				stack[level - 2].label == CATALOG) {
+				if (strcmp(type, "object-store") == 0) {
+					strncpy(auth_info->url, filtered_url,
+						sizeof(auth_info->url));
+				}
+			}
+			--level;
+		}
+	}
+
+	strncpy(auth_info->token, token_id, sizeof(auth_info->token));
+
+	assert(level == 0);
+
+	if (*auth_info->token == 0) {
+		fprintf(stderr, "error: can not receive token from response\n");
+		return(false);
+	}
+
+	if (*auth_info->url == 0) {
+		fprintf(stderr, "error: can not get URL from response\n");
+		return(false);
+	}
+
+	return(true);
+}
+
+/*********************************************************************//**
+Authenticate against Swift TempAuth. Fills swift_auth_info struct.
+Uses creadentials privided as global variables.
+@returns true if access is granted and token received. */
+static
+bool
+swift_keystone_auth_v2(const char *auth_url, swift_auth_info *info)
+{
+	char tenant_arg[SWIFT_MAX_URL_SIZE];
+	char payload[SWIFT_MAX_URL_SIZE];
+	struct curl_slist *slist = NULL;
+	download_buffer_info buf_info;
+	long http_code;
+	CURLcode res;
+	CURL *curl;
+	bool auth_res = false;
+
+	memset(&buf_info, 0, sizeof(buf_info));
+
+	if (opt_swift_user == NULL) {
+		fprintf(stderr, "error: both --swift-user is required "
+			"for keystone authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_password == NULL) {
+		fprintf(stderr, "error: both --swift-password is required "
+			"for keystone authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_tenant != NULL && opt_swift_tenant_id != NULL) {
+		fprintf(stderr, "error: both --swift-tenant and "
+			"--swift-tenant-id specified for keystone "
+			"authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_tenant != NULL) {
+		snprintf(tenant_arg, sizeof(tenant_arg), ",\"%s\":\"%s\"",
+			"tenantName", opt_swift_tenant);
+	} else if (opt_swift_tenant_id != NULL) {
+		snprintf(tenant_arg, sizeof(tenant_arg), ",\"%s\":\"%s\"",
+			"tenantId", opt_swift_tenant_id);
+	} else {
+		*tenant_arg = 0;
+	}
+
+	snprintf(payload, sizeof(payload), "{\"auth\": "
+		"{\"passwordCredentials\": {\"username\":\"%s\","
+		"\"password\":\"%s\"}%s}}",
+		opt_swift_user, opt_swift_password, tenant_arg);
+
+	curl = curl_easy_init();
+
+	if (curl != NULL) {
+
+		slist = curl_slist_append(slist,
+					  "Content-Type: application/json");
+		slist = curl_slist_append(slist,
+					  "Accept: application/json");
+
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, opt_verbose);
+		curl_easy_setopt(curl, CURLOPT_POST, 1L);
+		curl_easy_setopt(curl, CURLOPT_URL, auth_url);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fetch_buffer_cb);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf_info);
+		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+				 fetch_buffer_header_cb);
+		curl_easy_setopt(curl, CURLOPT_HEADERDATA,
+				 &buf_info);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+
+		if (opt_cacert != NULL)
+			curl_easy_setopt(curl, CURLOPT_CAINFO, opt_cacert);
+		if (opt_insecure)
+			curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
+
+		res = curl_easy_perform(curl);
+
+		if (res != CURLE_OK) {
+			fprintf(stderr,
+				"error: curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(res));
+			goto cleanup;
+		}
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		if (http_code < 200 || http_code >= 300) {
+			fprintf(stderr, "error: request failed "
+				"with response code: %ld\n", http_code);
+			res = CURLE_LOGIN_DENIED;
+			goto cleanup;
+		}
+	} else {
+		res = CURLE_FAILED_INIT;
+		fprintf(stderr, "error: curl_easy_init() failed\n");
+		goto cleanup;
+	}
+
+	if (!swift_parse_keystone_response_v2(buf_info.buf,
+				buf_info.size, info)) {
+		goto cleanup;
+	}
+
+	auth_res = true;
+
+cleanup:
+	if (curl)
+		curl_easy_cleanup(curl);
+
+	free(buf_info.buf);
+
+	return(auth_res);
+}
+
+
+/*********************************************************************//**
+Fills auth_info with response from keystone response.
+@return	true is response parsed successfully */
+static
+bool
+swift_parse_keystone_response_v3(char *response, size_t response_length,
+				swift_auth_info *auth_info)
+{
+	enum {MAX_DEPTH=20};
+	enum label_t {NONE, TOKEN, CATALOG, ENDPOINTS};
+
+	char url[SWIFT_MAX_URL_SIZE];
+	char filtered_url[SWIFT_MAX_URL_SIZE];
+	char region[SWIFT_MAX_URL_SIZE];
+	char interface[SWIFT_MAX_URL_SIZE];
+	char type[SWIFT_MAX_URL_SIZE];
+
+	struct stack_t {
+		jsmntok_t *t;
+		int n_items;
+		label_t label;
+	};
+
+	stack_t stack[MAX_DEPTH];
+	jsmntok_t *tokens;
+	int level;
+
+	tokens = json_tokenise(response, response_length, 200);
+
+	stack[0].t = &tokens[0];
+	stack[0].label = NONE;
+	stack[0].n_items = 1;
+	level = 0;
+
+	for (size_t i = 0, j = 1; j > 0; i++, j--) {
+		jsmntok_t *t = &tokens[i];
+
+		assert(t->start != -1 && t->end != -1);
+		assert(level >= 0);
+
+		--stack[level].n_items;
+
+		switch (t->type) {
+		case JSMN_ARRAY:
+		case JSMN_OBJECT:
+			if (level < MAX_DEPTH - 1) {
+				level++;
+			}
+			stack[level].t = t;
+			stack[level].label = NONE;
+			if (t->type == JSMN_ARRAY) {
+				stack[level].n_items = t->size;
+				j += t->size;
+			} else {
+				stack[level].n_items = t->size * 2;
+				j += t->size * 2;
+			}
+			break;
+		case JSMN_PRIMITIVE:
+		case JSMN_STRING:
+			if (stack[level].t->type == JSMN_OBJECT &&
+			    stack[level].n_items % 2 == 1) {
+				/* key */
+				if (json_token_eq(response, t, "token")) {
+					stack[level].label = TOKEN;
+					fprintf(stderr, "token\n");
+				}
+				if (json_token_eq(response, t,
+							"catalog")) {
+					stack[level].label = CATALOG;
+					fprintf(stderr, "catalog\n");
+				}
+				if (json_token_eq(response, t, "endpoints")) {
+					stack[level].label = ENDPOINTS;
+				}
+				if (json_token_eq(response, t, "region")) {
+					json_token_str(response, &tokens[i + 1],
+						region, sizeof(region));
+				}
+				if (json_token_eq(response, t, "url")) {
+					json_token_str(response, &tokens[i + 1],
+						url, sizeof(url));
+				}
+				if (json_token_eq(response, t, "interface")) {
+					json_token_str(response, &tokens[i + 1],
+						interface, sizeof(interface));
+				}
+				if (json_token_eq(response, t, "type")) {
+					json_token_str(response, &tokens[i + 1],
+						type, sizeof(type));
+				}
+			}
+			break;
+		}
+
+		while (stack[level].n_items == 0 && level > 0) {
+			if (stack[level].t->type == JSMN_OBJECT
+			    && level == 6
+			    && stack[level - 1].t->type == JSMN_ARRAY
+			    && stack[level - 2].label == ENDPOINTS) {
+				if ((opt_swift_region == NULL
+				     || strcmp(opt_swift_region, region) == 0)
+				    && strcmp(interface, "public") == 0) {
+					strncpy(filtered_url, url,
+						sizeof(filtered_url));
+				}
+			}
+			if (stack[level].t->type == JSMN_OBJECT &&
+				level == 4 &&
+				stack[level - 1].t->type == JSMN_ARRAY &&
+				stack[level - 2].label == CATALOG) {
+				if (strcmp(type, "object-store") == 0) {
+					strncpy(auth_info->url, filtered_url,
+						sizeof(auth_info->url));
+				}
+			}
+			--level;
+		}
+	}
+
+	assert(level == 0);
+
+	if (*auth_info->url == 0) {
+		fprintf(stderr, "error: can not get URL from response\n");
+		return(false);
+	}
+
+	return(true);
+}
+
+/*********************************************************************//**
+Captures X-Subject-Token header. */
+static
+size_t keystone_v3_header_cb(char *ptr, size_t size, size_t nmemb, void *data)
+{
+	swift_auth_info *info = (swift_auth_info*)(data);
+
+	get_http_header("X-Subject-Token: ", ptr,
+			info->token, array_elements(info->token));
+
+	return nmemb * size;
+}
+
+/*********************************************************************//**
+Authenticate against Swift TempAuth. Fills swift_auth_info struct.
+Uses creadentials privided as global variables.
+@returns true if access is granted and token received. */
+static
+bool
+swift_keystone_auth_v3(const char *auth_url, swift_auth_info *info)
+{
+	char scope[SWIFT_MAX_URL_SIZE];
+	char domain[SWIFT_MAX_URL_SIZE];
+	char payload[SWIFT_MAX_URL_SIZE];
+	struct curl_slist *slist = NULL;
+	download_buffer_info buf_info;
+	long http_code;
+	CURLcode res;
+	CURL *curl;
+	bool auth_res = false;
+
+	memset(&buf_info, 0, sizeof(buf_info));
+	buf_info.custom_header_callback = keystone_v3_header_cb;
+	buf_info.custom_header_callback_data = info;
+
+	if (opt_swift_user == NULL) {
+		fprintf(stderr, "error: both --swift-user is required "
+			"for keystone authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_password == NULL) {
+		fprintf(stderr, "error: both --swift-password is required "
+			"for keystone authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_project_id != NULL && opt_swift_project != NULL) {
+		fprintf(stderr, "error: both --swift-project and "
+			"--swift-project-id specified for keystone "
+			"authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_domain_id != NULL && opt_swift_domain != NULL) {
+		fprintf(stderr, "error: both --swift-domain and "
+			"--swift-domain-id specified for keystone "
+			"authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_project_id != NULL && opt_swift_domain != NULL) {
+		fprintf(stderr, "error: both --swift-project-id and "
+			"--swift-domain specified for keystone "
+			"authentication.\n");
+		return(false);
+	}
+
+	if (opt_swift_project_id != NULL && opt_swift_domain_id != NULL) {
+		fprintf(stderr, "error: both --swift-project-id and "
+			"--swift-domain-id specified for keystone "
+			"authentication.\n");
+		return(false);
+	}
+
+	scope[0] = 0; domain[0] = 0;
+
+	if (opt_swift_domain != NULL) {
+		snprintf(domain, sizeof(domain),
+			",{\"domain\":{\"name\":\"%s\"}}",
+			opt_swift_domain);
+	} else if (opt_swift_domain_id != NULL) {
+		snprintf(domain, sizeof(domain),
+			",{\"domain\":{\"id\":\"%s\"}}",
+			opt_swift_domain_id);
+	}
+
+	if (opt_swift_project_id != NULL) {
+		snprintf(scope, sizeof(scope),
+			",\"scope\":{\"project\":{\"id\":\"%s\"}}",
+			opt_swift_project_id);
+	} else if (opt_swift_project != NULL) {
+		snprintf(scope, sizeof(scope),
+			",\"scope\":{\"project\":{\"name\":\"%s\"%s}}",
+			opt_swift_project_id, domain);
+	}
+
+	snprintf(payload, sizeof(payload), "{\"auth\":{\"identity\":"
+		"{\"methods\":[\"password\"],\"password\":{\"user\":"
+		"{\"name\":\"%s\",\"password\":\"%s\"%s}}}%s}}",
+		opt_swift_user, opt_swift_password,
+		*scope ? "" : ",\"domain\":{\"id\":\"default\"}",
+		scope);
+	fprintf(stderr, " payload = %s\n", payload);
+
+	curl = curl_easy_init();
+
+	if (curl != NULL) {
+
+		slist = curl_slist_append(slist,
+					  "Content-Type: application/json");
+		slist = curl_slist_append(slist,
+					  "Accept: application/json");
+
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, opt_verbose);
+		curl_easy_setopt(curl, CURLOPT_POST, 1L);
+		curl_easy_setopt(curl, CURLOPT_URL, auth_url);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fetch_buffer_cb);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf_info);
+		curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION,
+				 fetch_buffer_header_cb);
+		curl_easy_setopt(curl, CURLOPT_HEADERDATA,
+				 &buf_info);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+
+		if (opt_cacert != NULL)
+			curl_easy_setopt(curl, CURLOPT_CAINFO, opt_cacert);
+		if (opt_insecure)
+			curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
+
+		res = curl_easy_perform(curl);
+
+		if (res != CURLE_OK) {
+			fprintf(stderr,
+				"error: curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(res));
+			goto cleanup;
+		}
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		if (http_code < 200 || http_code >= 300) {
+			fprintf(stderr, "error: request failed "
+				"with response code: %ld\n", http_code);
+			res = CURLE_LOGIN_DENIED;
+			goto cleanup;
+		}
+	} else {
+		res = CURLE_FAILED_INIT;
+		fprintf(stderr, "error: curl_easy_init() failed\n");
+		goto cleanup;
+	}
+
+	if (!swift_parse_keystone_response_v3(buf_info.buf,
+				buf_info.size, info)) {
+		goto cleanup;
+	}
+
+	auth_res = true;
+
+cleanup:
+	if (curl)
+		curl_easy_cleanup(curl);
+
+	free(buf_info.buf);
+
+	return(auth_res);
+}
+
 int main(int argc, char **argv)
 {
 	swift_auth_info info;
@@ -1628,49 +2304,71 @@ int main(int argc, char **argv)
 	if (parse_args(argc, argv))
 		return 1;
 
-	if (opt_mode == MODE_PUT) {
+	curl_global_init(CURL_GLOBAL_ALL);
 
-		curl_global_init(CURL_GLOBAL_ALL);
+	if (opt_swift_auth_version == NULL || *opt_swift_auth_version == '1') {
+		/* TempAuth */
+		snprintf(auth_url, SWIFT_MAX_URL_SIZE, "%sauth/v%s/",
+			 opt_swift_url, opt_swift_auth_version ?
+			 			opt_swift_auth_version : "1.0");
 
-		snprintf(auth_url, SWIFT_MAX_URL_SIZE, "%sauth/v1.0/", opt_url);
-
-		if (swift_auth(auth_url, opt_user, opt_key, &info) != 0) {
+		if (!swift_temp_auth(auth_url, &info)) {
 			fprintf(stderr, "failed to authenticate\n");
 			return 1;
 		}
 
-		if (swift_create_container(&info, opt_container) != 0) {
+	} else if (*opt_swift_auth_version == '2') {
+		/* Keystone v2 */
+		snprintf(auth_url, SWIFT_MAX_URL_SIZE, "%sv%s/tokens",
+			 opt_swift_url, opt_swift_auth_version);
+
+		if (!swift_keystone_auth_v2(auth_url, &info)) {
+			fprintf(stderr, "failed to authenticate\n");
+			return 1;
+		}
+	} else if (*opt_swift_auth_version == '3') {
+		/* Keystone v3 */
+		snprintf(auth_url, SWIFT_MAX_URL_SIZE, "%sv%s/auth/tokens",
+			 opt_swift_url, opt_swift_auth_version);
+
+		if (!swift_keystone_auth_v3(auth_url, &info)) {
+			fprintf(stderr, "failed to authenticate\n");
+			return 1;
+		}
+	}
+
+	if (opt_swift_storage_url != NULL) {
+		snprintf(info.url, sizeof(info.url), "%s",
+			 opt_swift_storage_url);
+	}
+
+	fprintf(stderr, "Object sore URL: %s\n", info.url);
+
+	if (opt_mode == MODE_PUT) {
+
+		if (swift_create_container(&info, opt_swift_container) != 0) {
 			fprintf(stderr, "failed to create container %s\n",
-				opt_container);
+				opt_swift_container);
 			return 1;
 		}
 
-		if (swift_upload_parts(&info, opt_container, opt_name) != 0) {
+		if (swift_upload_parts(&info,
+					opt_swift_container, opt_name) != 0) {
 			fprintf(stderr, "upload failed\n");
 			return 1;
 		}
 
-		curl_global_cleanup();
-
 	} else {
 
-		curl_global_init(CURL_GLOBAL_ALL);
-
-		snprintf(auth_url, SWIFT_MAX_URL_SIZE, "%sauth/v1.0/", opt_url);
-
-		if (swift_auth(auth_url, opt_user, opt_key, &info) != 0) {
-			fprintf(stderr, "failed to authenticate\n");
-			return 1;
-		}
-
-		if (swift_download(&info, opt_container, opt_name)
+		if (swift_download(&info, opt_swift_container, opt_name)
 				   != CURLE_OK) {
 			fprintf(stderr, "download failed\n");
 			return 1;
 		}
 
-		curl_global_cleanup();
 	}
+
+	curl_global_cleanup();
 
 	return 0;
 }
