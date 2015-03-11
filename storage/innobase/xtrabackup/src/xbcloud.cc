@@ -2228,7 +2228,6 @@ swift_keystone_auth_v3(const char *auth_url, swift_auth_info *info)
 		opt_swift_user, opt_swift_password,
 		*scope ? "" : ",\"domain\":{\"id\":\"default\"}",
 		scope);
-	fprintf(stderr, " payload = %s\n", payload);
 
 	curl = curl_easy_init();
 
