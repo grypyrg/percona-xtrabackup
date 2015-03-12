@@ -116,6 +116,7 @@ char *opt_ibx_host = NULL;
 char *opt_ibx_defaults_group = NULL;
 char *opt_ibx_socket = NULL;
 uint opt_ibx_port = 0;
+char *opt_login_path = NULL;
 
 const char *ibx_query_type_names[] = { "ALL", "UPDATE", "SELECT", NullS};
 
@@ -2011,8 +2012,6 @@ ibx_mysql_query(MYSQL *connection, const char *query, bool use_result,
 {
 	MYSQL_RES *mysql_result = NULL;
 
-	ibx_msg("Executing query: %s\n", query);
-
 	if (mysql_query(connection, query)) {
 		ibx_msg("Error: failed to execute query %s: %s\n", query,
 			mysql_error(connection));
@@ -2130,7 +2129,6 @@ static
 bool
 check_server_version(const char *version, const char *innodb_version)
 {
-	fprintf(stderr, "%d\n", fnmatch("5.6.*", version, FNM_PATHNAME));
 	if (!((fnmatch("5.[123].*", version, FNM_PATHNAME) == 0
 	       && innodb_version != NULL)
 	      || (fnmatch("5.5.*", version, FNM_PATHNAME) == 0)

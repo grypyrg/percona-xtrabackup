@@ -929,7 +929,7 @@ debug_sync_point(const char *name)
 }
 
 static const char *xb_load_default_groups[]=
-	{ "mysqld", "xtrabackup", "client", 0, 0 };
+	{ "mysqld", "xtrabackup", "client", 0, 0, 0 };
 
 static void print_version(void)
 {
@@ -6131,6 +6131,22 @@ setup_signals()
 #endif
 }
 
+/**************************************************************************
+Append group name to xb_load_default_groups list. */
+static
+void
+append_defaults_group(const char *group)
+{
+	uint i;
+	for (i = 3; i < array_elements(xb_load_default_groups); i++) {
+		if (xb_load_default_groups[i] == NULL) {
+			xb_load_default_groups[i] = group;
+			break;
+		}
+	}
+	ut_a(xb_load_default_groups[i + 1] == NULL);
+}
+
 /* ================= main =================== */
 
 int main(int argc, char **argv)
@@ -6154,9 +6170,14 @@ int main(int argc, char **argv)
 		char*	optend;
 		for (i=1; i < argc; i++) {
 			optend = strcend(argv[i], '=');
-			if (strncmp(argv[i], "--defaults-group", optend - argv[i]) == 0) {
-				xb_load_default_groups[3] = defaults_group
-							  = optend + 1;
+			if (strncmp(argv[i], "--defaults-group",
+				    optend - argv[i]) == 0) {
+				defaults_group = optend + 1;
+				append_defaults_group(defaults_group);
+			}
+			if (strncmp(argv[i], "--login-path",
+				    optend - argv[i]) == 0) {
+				append_defaults_group(optend + 1);
 			}
 		}
 	}
