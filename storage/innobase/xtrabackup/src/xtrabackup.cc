@@ -2489,17 +2489,6 @@ xtrabackup_init_datasinks(void)
 	/* Track it for destruction */
 	xtrabackup_add_datasink(ds_data);
 
-	/* Encryption always done just before final output */
-	if (xtrabackup_encrypt) {
-		ds_ctxt_t	*ds;
-
-		ds = ds_create(xtrabackup_target_dir, DS_TYPE_ENCRYPT);
-		xtrabackup_add_datasink(ds);
-
-		ds_set_pipe(ds, ds_data);
-		ds_data = ds_meta = ds;
-	}
-
 	/* Stream formatting */
 	if (xtrabackup_stream) {
 		ds_ctxt_t	*ds;
@@ -2526,6 +2515,17 @@ xtrabackup_init_datasinks(void)
 		} else {
 			ds_meta = ds_data;
 		}
+	}
+
+	/* Encryption */
+	if (xtrabackup_encrypt) {
+		ds_ctxt_t	*ds;
+
+		ds = ds_create(xtrabackup_target_dir, DS_TYPE_ENCRYPT);
+		xtrabackup_add_datasink(ds);
+
+		ds_set_pipe(ds, ds_data);
+		ds_data = ds_meta = ds;
 	}
 
 	/* Compression for ds_data */
