@@ -19,6 +19,7 @@ INCLUDE(libev)
 INCLUDE(mysqlclient)
 
 ADD_SUBDIRECTORY(libarchive)
+ADD_SUBDIRECTORY(jsmn)
 
 FIND_GCRYPT()
 FIND_CURL()
@@ -31,6 +32,7 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/sql
   ${CMAKE_SOURCE_DIR}/storage/innobase/xtrabackup/src/libarchive/libarchive
   ${CMAKE_SOURCE_DIR}/storage/innobase/xtrabackup/src/quicklz
+  ${CMAKE_SOURCE_DIR}/storage/innobase/xtrabackup/src/jsmn
   ${GCRYPT_INCLUDE_DIR}
   ${CURL_INCLUDE_DIRS}
   ${LIBEV_INCLUDE_DIRS}
@@ -178,4 +180,6 @@ TARGET_LINK_LIBRARIES(xbcloud
   ${LIBEV_LIBRARIES}
   ${CURL_LIBRARIES}
   mysys
+  mysys_ssl
+  jsmn
   )
