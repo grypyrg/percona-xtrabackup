@@ -73,6 +73,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 using std::min;
 using std::max;
 
+/* special files */
+#define XTRABACKUP_SLAVE_INFO "xtrabackup_slave_info"
+#define XTRABACKUP_GALERA_INFO "xtrabackup_galera_info"
+#define XTRABACKUP_BINLOG_INFO "xtrabackup_binlog_info"
+#define XTRABACKUP_INFO "xtrabackup_info"
+
 /* list of files to sync for --rsync mode */
 std::set<std::string> rsync_list;
 
@@ -252,7 +258,7 @@ file_exists(const char *filename)
 Trim leading slashes from absolute path so it becomes relative */
 static
 const char *
-trim_root(const char *path)
+trim_dotslash(const char *path)
 {
 	while (*path) {
 		if (is_path_separator(*path)) {
@@ -507,10 +513,8 @@ datadir_iter_next_database(datadir_iter_t *it)
 	if (it->dbdir != NULL) {
 		if (os_file_closedir(it->dbdir) != 0) {
 
-			fputs("Warning: could not"
-			      " close database directory ", stderr);
-			ut_print_filename(stderr, it->dbpath);
-			putc('\n', stderr);
+			ibx_msg("Warning: could not"
+			      " close database directory %s\n", it->dbpath);
 
 			it->err = DB_ERROR;
 
@@ -570,6 +574,8 @@ datadir_iter_next_database(datadir_iter_t *it)
 	return(false);
 }
 
+/************************************************************************
+Concatenate n parts into single path */
 static
 void
 make_path_n(int n, char **path, ulint *path_len, ...)
@@ -597,9 +603,14 @@ make_path_n(int n, char **path, ulint *path_len, ...)
 	p = va_arg(vl, char*);
 	strcpy(*path, p);
 	for (i = 1; i < n; i++) {
+		size_t plen;
 		p = va_arg(vl, char*);
-		strcat(*path, "/");
-		strcat(*path, p);
+		plen = strlen(*path);
+		if (!is_path_separator((*path)[plen - 1])) {
+			(*path)[plen] = FN_LIBCHAR;
+			(*path)[plen + 1] = 0;
+		}
+		strcat(*path + plen, p);
 	}
 	va_end(vl);
 }
@@ -611,7 +622,6 @@ datadir_iter_next_file(datadir_iter_t *it)
 	if (it->is_file && it->dbpath) {
 		make_path_n(2, &it->filepath, &it->filepath_len,
 				it->datadir_path, it->dbinfo.name);
-		srv_normalize_path_for_win(it->filepath);
 
 		make_path_n(1, &it->filepath_rel, &it->filepath_rel_len,
 				it->dbinfo.name);
@@ -639,7 +649,6 @@ datadir_iter_next_file(datadir_iter_t *it)
 		make_path_n(3, &it->filepath, &it->filepath_len,
 				it->datadir_path, it->dbinfo.name,
 				it->fileinfo.name);
-		srv_normalize_path_for_win(it->filepath);
 
 		make_path_n(2, &it->filepath_rel, &it->filepath_rel_len,
 				it->dbinfo.name, it->fileinfo.name);
@@ -678,7 +687,6 @@ datadir_iter_next(datadir_iter_t *it, datadir_node_t *node)
 
 		make_path_n(2, &it->filepath, &it->filepath_len,
 				it->datadir_path, it->dbinfo.name);
-		srv_normalize_path_for_win(it->filepath);
 
 		make_path_n(1, &it->filepath_rel, &it->filepath_rel_len,
 				it->dbinfo.name);
@@ -913,7 +921,8 @@ copy_file(const char *src_file_path, const char *dst_file_path, uint thread_n)
 
 	strncpy(dst_name, cursor.rel_path, sizeof(dst_name));
 
-	dstfile = ds_open(ds_data, dst_file_path, &cursor.statinfo);
+	dstfile = ds_open(ds_data, trim_dotslash(dst_file_path),
+				   &cursor.statinfo);
 	if (dstfile == NULL) {
 		ibx_msg("[%02u] error: "
 			"cannot open the destination stream for %s\n",
@@ -2351,6 +2360,7 @@ select_incremental_lsn_from_history(lsn_t *incremental_lsn)
 			opt_ibx_incremental_history_uuid ?
 		    		opt_ibx_incremental_history_uuid :
 		    		opt_ibx_incremental_history_name);
+		return(false);
 	}
 
 	*incremental_lsn = strtoull(row[0], NULL, 10);
@@ -2843,7 +2853,7 @@ write_slave_info(MYSQL *connection)
 			*ptr = ' ';
 		}
 
-		result = backup_file_printf("xtrabackup_slave_info",
+		result = backup_file_printf(XTRABACKUP_SLAVE_INFO,
 			"SET GLOBAL gtid_purged='%s';\n"
 			"CHANGE MASTER TO MASTER_AUTO_POSITION=1\n",
 			gtid_executed);
@@ -2853,13 +2863,13 @@ write_slave_info(MYSQL *connection)
 			master, gtid_executed) != -1);
 	} else if (gtid_slave_pos && *gtid_slave_pos) {
 		/* MariaDB >= 10.0 with GTID enabled */
-		result = backup_file_printf("xtrabackup_slave_info",
+		result = backup_file_printf(XTRABACKUP_SLAVE_INFO,
 			"CHANGE MASTER TO master_use_gtid = slave_pos\n");
 		ut_a(asprintf(&mysql_slave_position,
 			"master host '%s', gtid_slave_pos %s",
 			master, gtid_slave_pos) != -1);
 	} else {
-		result = backup_file_printf("xtrabackup_slave_info",
+		result = backup_file_printf(XTRABACKUP_SLAVE_INFO,
 			"CHANGE MASTER TO MASTER_LOG_FILE='%s', "
 			"MASTER_LOG_POS=%s\n", filename, position);
 		ut_a(asprintf(&mysql_slave_position,
@@ -2912,7 +2922,7 @@ write_galera_info(MYSQL *connection)
 		goto cleanup;
 	}
 
-	result = backup_file_printf("xtrabackup_galera_info",
+	result = backup_file_printf(XTRABACKUP_GALERA_INFO,
 		"%s:%s\n", state_uuid ? state_uuid : state_uuid55,
 			last_committed ? last_committed : last_committed55);
 
@@ -3049,18 +3059,18 @@ write_binlog_info(MYSQL *connection)
 			"filename '%s', position '%s', "
 			"GTID of the last change '%s'",
 			filename, position, gtid) != -1);
-		result = backup_file_printf("xtrabackup_binlog_info",
+		result = backup_file_printf(XTRABACKUP_BINLOG_INFO,
 				"%s\t%s\t%s", filename, position, gtid);
 	} else if (mysql_gtid) {
 		ut_a(asprintf(&mysql_binlog_position,
 			"GTID of the last change '%s'", gtid) != -1);
-		result = backup_file_printf("xtrabackup_binlog_info",
+		result = backup_file_printf(XTRABACKUP_BINLOG_INFO,
 				"%s", gtid);
 	} else {
 		ut_a(asprintf(&mysql_binlog_position,
 			"filename '%s', position '%s'",
 			filename, position) != -1);
-		result = backup_file_printf("xtrabackup_binlog_info",
+		result = backup_file_printf(XTRABACKUP_BINLOG_INFO,
 				"%s\t%s", filename, position);
 	}
 
@@ -3113,7 +3123,7 @@ write_xtrabackup_info(MYSQL *connection)
 	localtime_r(&history_end_time, &tm);
 	strftime(buf_end_time, sizeof(buf_end_time),
 		 "%Y-%m-%d %H:%M:%S", &tm);
-	backup_file_printf("xtrabackup_info",
+	backup_file_printf(XTRABACKUP_INFO,
 		"uuid = %s\n"
 		"name = %s\n"
 		"tool_name = %s\n"
@@ -3410,7 +3420,8 @@ backup_files(const char *from, bool prep_mode)
 			char path[FN_REFLEN];
 			ut_snprintf(path, sizeof(path),
 					"%s/db.opt", node.filepath);
-			if (!(ret = backup_file_printf(path, "%s", ""))) {
+			if (!(ret = backup_file_printf(
+					trim_dotslash(path), "%s", ""))) {
 				ibx_msg("Failed to create file %s\n", path);
 				goto out;
 			}
@@ -3964,7 +3975,7 @@ ibx_backup_finish()
 		if (buffer_pool_filename && file_exists(buffer_pool_filename)) {
 			const char *dst_name;
 
-			dst_name = trim_root(buffer_pool_filename);
+			dst_name = trim_dotslash(buffer_pool_filename);
 			copy_file(buffer_pool_filename, dst_name, 0);
 		}
 		if (file_exists("ib_lru_dump")) {
@@ -4042,7 +4053,7 @@ ibx_copy_incremental_over_full()
 		if (innobase_buffer_pool_filename) {
 			const char *src_name;
 
-			src_name = trim_root(innobase_buffer_pool_filename);
+			src_name = trim_dotslash(innobase_buffer_pool_filename);
 
 			snprintf(path, sizeof(path), "%s/%s",
 				xtrabackup_incremental_dir,
@@ -4339,7 +4350,7 @@ ibx_copy_back()
 		const char *src_name;
 		char path[FN_REFLEN];
 
-		src_name = trim_root(innobase_buffer_pool_filename);
+		src_name = trim_dotslash(innobase_buffer_pool_filename);
 
 		snprintf(path, sizeof(path), "%s/%s",
 			mysql_data_home,

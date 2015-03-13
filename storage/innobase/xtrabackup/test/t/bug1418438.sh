@@ -8,7 +8,7 @@ mysql -e "CREATE TABLE test (A INT PRIMARY KEY) ENGINE=MyISAM" test
 
 innobackupex --compress --no-timestamp --include=test.test $topdir/backup
 
-diff -u <(ls $topdir/backup/test) - <<EOF
+diff -u <(LANG=C ls $topdir/backup/test) - <<EOF
 test.MYD.qp
 test.MYI.qp
 test.frm.qp
