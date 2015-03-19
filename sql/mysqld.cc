@@ -765,9 +765,13 @@ static volatile sig_atomic_t kill_in_progress;
 
 
 static my_bool opt_myisam_log;
+#ifndef EMBEDDED_LIBRARY
 static int cleanup_done;
+#endif
 static ulong opt_specialflag;
+#ifndef EMBEDDED_LIBRARY
 static char *opt_update_logname;
+#endif
 char *opt_binlog_index_name;
 char *mysql_home_ptr, *pidfile_name_ptr;
 /** Initial command line arguments (count), after load_defaults().*/
@@ -809,6 +813,7 @@ Gtid_state *gtid_state= NULL;
   global_thread_list and waiting_thd_list are both pointers to objects
   on the heap, to avoid potential problems with running destructors atexit().
  */
+#ifndef EMBEDDED_LIBRARY
 static void delete_global_thread_list()
 {
   delete global_thread_list;
@@ -816,6 +821,7 @@ static void delete_global_thread_list()
   global_thread_list= NULL;
   waiting_thd_list= NULL;
 }
+#endif
 
 Thread_iterator global_thread_list_begin()
 {
@@ -1167,7 +1173,9 @@ static void charset_error_reporter(enum loglevel level,
 }
 C_MODE_END
 
+#ifndef EMBEDDED_LIBRARY
 static MYSQL_SOCKET unix_sock, ip_sock;
+#endif
 struct rand_struct sql_rand; ///< used by sql_class.cc:THD::THD()
 
 #ifndef EMBEDDED_LIBRARY
@@ -1264,14 +1272,18 @@ uint connection_count= 0;
 /* Function declarations */
 
 pthread_handler_t signal_hand(void *arg);
+#ifndef EMBEDDED_LIBRARY
 static int mysql_init_variables(void);
 static int get_options(int *argc_ptr, char ***argv_ptr);
+#endif
 static void add_terminator(vector<my_option> *options);
 extern "C" my_bool mysqld_get_one_option(int, const struct my_option *, char *);
+#ifndef EMBEDDED_LIBRARY
 static void set_server_version(void);
 static int init_thread_environment();
 static char *get_relative_path(const char *path);
 static int fix_paths(void);
+#endif
 void handle_connections_sockets();
 #ifdef _WIN32
 pthread_handler_t handle_connections_sockets_thread(void *arg);
@@ -1287,7 +1299,9 @@ pthread_handler_t handle_connections_shared_memory(void *arg);
 #endif
 pthread_handler_t handle_slave(void *arg);
 static void clean_up(bool print_message);
+#ifndef EMBEDDED_LIBRARY
 static int test_if_case_insensitive(const char *dir_name);
+#endif
 
 #ifndef EMBEDDED_LIBRARY
 static bool pid_file_created= false;
@@ -1298,9 +1312,9 @@ static void clean_up_mutexes(void);
 static void wait_for_signal_thread_to_end(void);
 static void create_pid_file();
 static void mysqld_exit(int exit_code) __attribute__((noreturn));
-#endif
 static void delete_pid_file(myf flags);
 static void end_ssl();
+#endif
 
 
 #ifndef EMBEDDED_LIBRARY
@@ -1829,6 +1843,7 @@ bool gtid_server_init()
 
 void clean_up(bool print_message)
 {
+#ifndef EMBEDDED_LIBRARY
   DBUG_PRINT("exit",("clean_up"));
   if (cleanup_done++)
     return; /* purecov: inspected */
@@ -1952,6 +1967,7 @@ void clean_up(bool print_message)
     killed us
   */
   DBUG_PRINT("quit", ("done with cleanup"));
+#endif
 } /* clean_up */
 
 
@@ -3407,6 +3423,7 @@ check_enough_stack_size(int recurse_level)
     1 error
 */
 
+#ifndef EMBEDDED_LIBRARY
 static bool init_global_datetime_format(timestamp_type format_type,
                                         DATE_TIME_FORMAT *format)
 {
@@ -3424,6 +3441,7 @@ static bool init_global_datetime_format(timestamp_type format_type,
   }
   return false;
 }
+#endif
 
 SHOW_VAR com_status_vars[]= {
   {"admin_commands",       (char*) offsetof(STATUS_VAR, com_other), SHOW_LONG_STATUS},
@@ -3699,6 +3717,7 @@ rpl_make_log_name(const char *opt,
 
 int init_common_variables()
 {
+#ifndef EMBEDDED_LIBRARY
   umask(((~my_umask) & 0666));
   connection_errors_select= 0;
   connection_errors_accept= 0;
@@ -4176,10 +4195,12 @@ You should consider changing lower_case_table_names to 1 or 2",
     return 1;
   }
 
+#endif
   return 0;
 }
 
 
+#ifndef EMBEDDED_LIBRARY
 static int init_thread_environment()
 {
   mysql_mutex_init(key_LOCK_thread_created,
@@ -4262,6 +4283,7 @@ static int init_thread_environment()
   }
   return 0;
 }
+#endif
 
 
 #if defined(HAVE_OPENSSL) && !defined(HAVE_YASSL)
@@ -4378,6 +4400,7 @@ static int init_ssl()
 }
 
 
+#ifndef EMBEDDED_LIBRARY
 static void end_ssl()
 {
 #ifdef HAVE_OPENSSL
@@ -4393,6 +4416,7 @@ static void end_ssl()
 #endif
 #endif /* HAVE_OPENSSL */
 }
+#endif
 
 /**
   Generate a UUID and save it into server_uuid variable.
@@ -5940,6 +5964,7 @@ static void bootstrap(MYSQL_FILE *file)
 {
   DBUG_ENTER("bootstrap");
 
+#ifndef EMBEDDED_LIBRARY
   THD *thd= new THD;
   thd->bootstrap=1;
   my_net_init(&thd->net,(st_vio*) 0);
@@ -5975,6 +6000,7 @@ static void bootstrap(MYSQL_FILE *file)
   do_handle_bootstrap(thd);
 #endif
 
+#endif
   DBUG_VOID_RETURN;
 }
 
@@ -8163,6 +8189,7 @@ To see what values a running MySQL server is using, type\n\
     as these are initialized by my_getopt.
 */
 
+#ifndef EMBEDDED_LIBRARY
 static int mysql_init_variables(void)
 {
   /* Things reset to zero */
@@ -8358,6 +8385,7 @@ static int mysql_init_variables(void)
 #endif
   return 0;
 }
+#endif
 
 my_bool
 mysqld_get_one_option(int optid,
@@ -8756,6 +8784,7 @@ pfs_error:
 
 /** Handle arguments for multiple key caches. */
 
+#ifndef EMBEDDED_LIBRARY
 C_MODE_START
 
 static void*
@@ -9036,6 +9065,7 @@ static char *get_relative_path(const char *path)
   }
   return (char*) path;
 }
+#endif
 
 
 /**
@@ -9119,6 +9149,7 @@ bool is_secure_file_path(char *path)
 }
 
 
+#ifndef EMBEDDED_LIBRARY
 static int fix_paths(void)
 {
   char buff[FN_REFLEN],*pos;
@@ -9199,6 +9230,7 @@ static int fix_paths(void)
 
   return 0;
 }
+#endif
 
 /**
   Check if file system used for databases is case insensitive.
@@ -9213,6 +9245,7 @@ static int fix_paths(void)
     1   File system is case insensitive
 */
 
+#ifndef EMBEDDED_LIBRARY
 static int test_if_case_insensitive(const char *dir_name)
 {
   int result= 0;
@@ -9241,8 +9274,6 @@ static int test_if_case_insensitive(const char *dir_name)
 }
 
 
-#ifndef EMBEDDED_LIBRARY
-
 /**
   Create file to store pid number.
 */
@@ -9267,7 +9298,6 @@ static void create_pid_file()
   sql_perror("Can't start server: can't create PID file");
   exit(1);
 }
-#endif /* EMBEDDED_LIBRARY */
 
 
 /**
@@ -9278,7 +9308,6 @@ static void create_pid_file()
 
 static void delete_pid_file(myf flags)
 {
-#ifndef EMBEDDED_LIBRARY
   File file;
   if (opt_bootstrap ||
       !pid_file_created ||
@@ -9297,9 +9326,9 @@ static void delete_pid_file(myf flags)
     mysql_file_delete(key_file_pid, pidfile_name, flags);
     pid_file_created= false;
   }
-#endif /* EMBEDDED_LIBRARY */
   return;
 }
+#endif /* EMBEDDED_LIBRARY */
 
 
 /** Clear most status variables. */

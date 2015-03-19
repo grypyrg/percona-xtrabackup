@@ -45,14 +45,9 @@ ENDFOREACH()
 SET(SQL_EMBEDDED_SOURCES
   emb_qcache.cc
   lib_sql.cc 
-  libmysqld.c
   ${GEN_SOURCES}
   ${MYSYS_LIBWRAP_SOURCE}
-  ../client/get_password.c
   ../libmysql/errmsg.c
-  ../libmysql/libmysql.c
-  ../sql-common/client.c
-  ../sql-common/client_plugin.c
   ../sql-common/my_time.c 
   ../sql-common/my_user.c
   ../sql-common/pack.c
@@ -93,7 +88,7 @@ ENDIF()
 
 
 SET(LIBS 
-  dbug strings regex mysys mysys_ssl vio 
+  dbug strings regex mysys mysys_ssl
   ${ZLIB_LIBRARY} ${SSL_LIBRARIES} 
   ${LIBWRAP} ${LIBCRYPT} ${LIBDL}
   ${MYSQLD_STATIC_PLUGIN_LIBS}

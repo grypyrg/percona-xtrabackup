@@ -69,6 +69,17 @@ typedef struct xml_stack_st
   int  (*leave_xml)(struct xml_stack_st *st,const char *val, size_t len);
 } MY_XML_PARSER;
 
+#define my_xml_parser_create xb_my_xml_parser_create
+#define my_xml_parser_free xb_my_xml_parser_free
+#define my_xml_parse xb_my_xml_parse
+#define my_xml_set_value_handler xb_my_xml_set_value_handler
+#define my_xml_set_enter_handler xb_my_xml_set_enter_handler
+#define my_xml_set_leave_handler xb_my_xml_set_leave_handler
+#define my_xml_set_user_data xb_my_xml_set_user_data
+#define my_xml_error_pos xb_my_xml_error_pos
+#define my_xml_error_lineno xb_my_xml_error_lineno
+#define my_xml_error_string xb_my_xml_error_string
+
 void my_xml_parser_create(MY_XML_PARSER *st);
 void my_xml_parser_free(MY_XML_PARSER *st);
 int  my_xml_parse(MY_XML_PARSER *st,const char *str, size_t len);

@@ -799,6 +799,15 @@ extern pthread_mutexattr_t my_errorcheck_mutexattr;
 
 typedef ulong my_thread_id;
 
+#define my_thread_global_init xb_my_thread_global_init
+#define my_thread_global_reinit xb_my_thread_global_reinit
+#define my_thread_global_end xb_my_thread_global_end
+#define my_thread_init xb_my_thread_init
+#define my_thread_end xb_my_thread_end
+#define my_thread_name xb_my_thread_name
+#define my_thread_dbug_id xb_my_thread_dbug_id
+#define pthread_dummy xb_pthread_dummy
+
 extern my_bool my_thread_global_init(void);
 extern void my_thread_global_reinit(void);
 extern void my_thread_global_end(void);

@@ -190,6 +190,7 @@ static inline Host_entry *hostname_cache_search(const char *ip_key)
   return (Host_entry *) hostname_cache->search((uchar *) ip_key, 0);
 }
 
+#ifndef EMBEDDED_LIBRARY
 static void add_hostname_impl(const char *ip_key, const char *hostname,
                               bool validated, Host_errors *errors,
                               ulonglong now)
@@ -288,6 +289,7 @@ static void add_hostname(const char *ip_key, const char *hostname,
 
   return;
 }
+#endif
 
 void inc_host_errors(const char *ip_string, Host_errors *errors)
 {
@@ -411,6 +413,9 @@ int ip_to_hostname(struct sockaddr_storage *ip_storage,
                    char **hostname,
                    uint *connect_errors)
 {
+#ifdef EMBEDDED_LIBRARY
+  DBUG_ENTER("ip_to_hostname");
+#else
   const struct sockaddr *ip= (const sockaddr *) ip_storage;
   int err_code;
   bool err_status;
@@ -1002,5 +1007,6 @@ int ip_to_hostname(struct sockaddr_storage *ip_storage,
   if (free_addr_info_list)
     freeaddrinfo(addr_info_list);
 
+#endif
   DBUG_RETURN(false);
 }

@@ -16,12 +16,14 @@
 INCLUDE(gcrypt)
 INCLUDE(curl)
 INCLUDE(libev)
+INCLUDE(mysqlclient)
 
 ADD_SUBDIRECTORY(libarchive)
 
 FIND_GCRYPT()
 FIND_CURL()
 FIND_EV()
+FIND_MYSQL()
 
 INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/include
@@ -40,10 +42,17 @@ INCLUDE_DIRECTORIES(
 ########################################################################
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/xtrabackup_version.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/xtrabackup_version.h )
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/mysql_h_sys.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/mysql_h_sys.h )
+
+EXECUTE_PROCESS(COMMAND xxd --include version_check.pl
+                ${CMAKE_CURRENT_BINARY_DIR}/version_check_pl.h
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 
 MYSQL_ADD_EXECUTABLE(xtrabackup
   xtrabackup.cc
+  innobackupex.cc
   changed_page_bitmap.cc
   compact.cc
   datasink.c
@@ -69,9 +78,17 @@ SET_TARGET_PROPERTIES(xtrabackup PROPERTIES ENABLE_EXPORTS TRUE)
 
 TARGET_LINK_LIBRARIES(xtrabackup 
   mysqlserver 
+  ${MYSQL_LIBRARIES}
   ${GCRYPT_LIBS} 
   archive_static
   )
+
+
+########################################################################
+# innobackupex symlink
+########################################################################
+ADD_CUSTOM_COMMAND(TARGET xtrabackup
+                   COMMAND ln -sf xtrabackup innobackupex)
 
 ########################################################################
 # xbstream binary
