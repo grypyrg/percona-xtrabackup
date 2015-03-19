@@ -98,6 +98,7 @@ static my_bool net_write_buff(NET *, const uchar *, ulong);
 my_bool my_net_init(NET *net, Vio* vio)
 {
   DBUG_ENTER("my_net_init");
+#ifndef EMBEDDED_LIBRARY
   net->vio = vio;
   my_net_local_init(net);			/* Set some limits */
   if (!(net->buff=(uchar*) my_malloc((size_t) net->max_packet+
@@ -123,6 +124,7 @@ my_bool my_net_init(NET *net, Vio* vio)
     net->fd= vio_fd(vio);
     vio_fastsend(vio);
   }
+#endif
   DBUG_RETURN(0);
 }
 

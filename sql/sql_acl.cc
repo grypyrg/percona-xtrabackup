@@ -9687,6 +9687,9 @@ static void login_failed_error(MPVIO_EXT *mpvio, int passwd_used)
 static bool send_server_handshake_packet(MPVIO_EXT *mpvio,
                                          const char *data, uint data_len)
 {
+#ifdef EMBEDDED_LIBRARY
+  return(true);
+#else
   DBUG_ASSERT(mpvio->status == MPVIO_EXT::FAILURE);
   DBUG_ASSERT(data_len <= 255);
 
@@ -9779,6 +9782,7 @@ static bool send_server_handshake_packet(MPVIO_EXT *mpvio,
            net_flush(mpvio->net);
   my_afree(buff);
   DBUG_RETURN (res);
+#endif
 }
 
 static bool secure_auth(MPVIO_EXT *mpvio)
@@ -9833,6 +9837,7 @@ static bool secure_auth(MPVIO_EXT *mpvio)
 static bool send_plugin_request_packet(MPVIO_EXT *mpvio,
                                        const uchar *data, uint data_len)
 {
+#ifndef EMBEDDED_LIBRARY
   DBUG_ASSERT(mpvio->packets_written == 1);
   DBUG_ASSERT(mpvio->packets_read == 1);
   NET *net= mpvio->net;
@@ -9904,6 +9909,9 @@ static bool send_plugin_request_packet(MPVIO_EXT *mpvio,
                                 (uchar*) client_auth_plugin,
                                 strlen(client_auth_plugin) + 1,
                                 (uchar*) data, data_len));
+#else
+  return true;
+#endif
 }
 
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
@@ -10412,10 +10420,10 @@ char *get_41_lenc_string(char **buffer,
 
 
 /* the packet format is described in send_client_reply_packet() */
+#ifndef EMBEDDED_LIBRARY
 static ulong parse_client_handshake_packet(MPVIO_EXT *mpvio,
                                            uchar **buff, ulong pkt_len)
 {
-#ifndef EMBEDDED_LIBRARY
   NET *net= mpvio->net;
   char *end;
   bool packet_has_required_size= false;
@@ -10793,10 +10801,8 @@ skip_to_ssl:
 
   *buff= (uchar*) passwd;
   return passwd_len;
-#else
-  return 0;
-#endif
 }
+#endif
 
 
 /**
@@ -10812,7 +10818,11 @@ static inline int
 wrap_plguin_data_into_proper_command(NET *net, 
                                      const uchar *packet, int packet_len)
 {
+#ifndef EMBEDDED_LIBRARY
   return net_write_command(net, 1, (uchar *) "", 0, packet, packet_len);
+#else
+  return 0;
+#endif
 }
 
 
@@ -10866,6 +10876,7 @@ static int server_mpvio_write_packet(MYSQL_PLUGIN_VIO *param,
 */
 static int server_mpvio_read_packet(MYSQL_PLUGIN_VIO *param, uchar **buf)
 {
+#ifndef EMBEDDED_LIBRARY
   MPVIO_EXT *mpvio= (MPVIO_EXT *) param;
   ulong pkt_len;
 
@@ -10951,6 +10962,9 @@ err:
     my_error(ER_HANDSHAKE_ERROR, MYF(0));
   }
   DBUG_RETURN(-1);
+#else
+  return 0;
+#endif
 }
 
 /**
@@ -10960,8 +10974,10 @@ err:
 static void server_mpvio_info(MYSQL_PLUGIN_VIO *vio,
                               MYSQL_PLUGIN_VIO_INFO *info)
 {
+#ifndef EMBEDDED_LIBRARY
   MPVIO_EXT *mpvio= (MPVIO_EXT *) vio;
   mpvio_info(mpvio->net->vio, info);
+#endif
 }
 
 #ifndef NO_EMBEDDED_ACCESS_CHECKS

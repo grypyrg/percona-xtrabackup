@@ -1976,8 +1976,10 @@ static Sys_var_ulong Sys_net_buffer_length(
 
 static bool fix_net_read_timeout(sys_var *self, THD *thd, enum_var_type type)
 {
+#ifndef EMBEDDED_LIBRARY
   if (type != OPT_GLOBAL)
     my_net_set_read_timeout(&thd->net, thd->variables.net_read_timeout);
+#endif
   return false;
 }
 static Sys_var_ulong Sys_net_read_timeout(
@@ -1991,8 +1993,10 @@ static Sys_var_ulong Sys_net_read_timeout(
 
 static bool fix_net_write_timeout(sys_var *self, THD *thd, enum_var_type type)
 {
+#ifndef EMBEDDED_LIBRARY
   if (type != OPT_GLOBAL)
     my_net_set_write_timeout(&thd->net, thd->variables.net_write_timeout);
+#endif
   return false;
 }
 static Sys_var_ulong Sys_net_write_timeout(

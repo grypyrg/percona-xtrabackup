@@ -218,6 +218,10 @@ ENDIF()
 IF(NOT WITH_EMBEDDED_SERVER)
   MESSAGE(FATAL_ERROR "This branch does not support -DWITH_EMBEDDED_SERVER=OFF configuration.")
 ENDIF()
+# Disallow federated storage engine
+IF(WITH_FEDERATED_STORAGE_ENGINE OR WITH_FEDERATED OR NOT WITHOUT_FEDERATED_STORAGE_ENGINE)
+  MESSAGE(FATAL_ERROR "This branch does not support -DWITH_FEDERATED_STORAGE_ENGINE=ON configuration.")
+ENDIF()
 
 include(CheckCSourceCompiles)
 include(CheckCXXSourceCompiles)
