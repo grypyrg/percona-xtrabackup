@@ -83,3 +83,9 @@ diff -u $topdir/partial/partial.list - <<EOF
 ibdata1
 sakila/payment.ibd
 EOF
+
+# cleanup
+xbcloud delete --swift-container=test_backup ${XBCLOUD_CREDENTIALS} \
+	${full_backup_name}
+xbcloud delete --swift-container=test_backup ${XBCLOUD_CREDENTIALS} \
+	${inc_backup_name}

@@ -166,7 +166,7 @@ static const char *opt_name = NULL;
 static const char *opt_cacert = NULL;
 static ulong opt_parallel = 1;
 static my_bool opt_insecure = 0;
-static enum {MODE_GET, MODE_PUT} opt_mode;
+static enum {MODE_GET, MODE_PUT, MODE_DELETE} opt_mode;
 
 static char **file_list = NULL;
 static int file_list_size = 0;
@@ -404,24 +404,16 @@ int parse_args(int argc, char **argv)
 	command = argv[1];
 	argc--; argv++;
 
-	if (strcmp(command, "put") == 0) {
+	if (strcasecmp(command, "put") == 0) {
 		opt_mode = MODE_PUT;
-	} else if (strcmp(command, "get") == 0) {
+	} else if (strcasecmp(command, "get") == 0) {
 		opt_mode = MODE_GET;
+	} else if (strcasecmp(command, "delete") == 0) {
+		opt_mode = MODE_DELETE;
 	} else {
 		fprintf(stderr, "Unknown command %s. "
 			"Supported commands are put and get\n", command);
 		usage();
-		exit(EXIT_FAILURE);
-	}
-
-	if (strcmp(command, "put") == 0) {
-		opt_mode = MODE_PUT;
-	} else if (strcmp(command, "get") == 0) {
-		opt_mode = MODE_GET;
-	} else {
-		fprintf(stderr, "Unknown command %s. "
-			"Supported commands are put and get\n", command);
 		exit(EXIT_FAILURE);
 	}
 
@@ -643,6 +635,7 @@ swift_create_container(swift_auth_info *info, const char *name)
 
 	if (curl != NULL) {
 		slist = curl_slist_append(slist, auth_token);
+		slist = curl_slist_append(slist, "Content-Length: 0");
 
 		curl_easy_setopt(curl, CURLOPT_VERBOSE, opt_verbose);
 		curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -684,6 +677,69 @@ cleanup:
 		curl_easy_cleanup(curl);
 
 	return res;
+}
+
+
+/*********************************************************************//**
+Delete object with given url.
+@returns true if object deleted successfully. */
+static
+bool
+swift_delete_object(swift_auth_info *info, const char *url)
+{
+	char auth_token[SWIFT_MAX_HDR_SIZE];
+	CURLcode res;
+	long http_code;
+	CURL *curl;
+	struct curl_slist *slist = NULL;
+	bool ret = false;
+
+	snprintf(auth_token, array_elements(auth_token), "X-Auth-Token: %s",
+		 info->token);
+
+	curl = curl_easy_init();
+
+	if (curl != NULL) {
+		slist = curl_slist_append(slist, auth_token);
+
+		curl_easy_setopt(curl, CURLOPT_VERBOSE, opt_verbose);
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE"); 
+		if (opt_cacert != NULL)
+			curl_easy_setopt(curl, CURLOPT_CAINFO, opt_cacert);
+		if (opt_insecure)
+			curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
+
+		res = curl_easy_perform(curl);
+
+		if (res != CURLE_OK) {
+			fprintf(stderr,
+				"error: curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(res));
+			goto cleanup;
+		}
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		if (http_code != 200 && /* OK */
+		    http_code != 204    /* no content */) {
+			fprintf(stderr, "error: request failed "
+				"with response code: %ld\n", http_code);
+			goto cleanup;
+		}
+		ret = true;
+	} else {
+		fprintf(stderr, "error: curl_easy_init() failed\n");
+		goto cleanup;
+	}
+
+cleanup:
+	if (slist)
+		curl_slist_free_all(slist);
+	if (curl)
+		curl_easy_cleanup(curl);
+
+	return ret;
 }
 
 /* Check for completed transfers, and remove their easy handles */
@@ -1749,6 +1805,43 @@ int swift_download(swift_auth_info *auth, const char *container,
 	return(CURLE_OK);
 }
 
+
+/*********************************************************************//**
+Delete backup with given name from given container.
+@return	true if backup deleted successfully */
+static
+bool swift_delete(swift_auth_info *auth, const char *container,
+		  const char *name)
+{
+	container_list *list;
+
+	if ((list = swift_list(auth, container)) == NULL) {
+		return(CURLE_FAILED_INIT);
+	}
+
+	for (size_t i = 0; i < list->object_count; i++) {
+		const char *chunk_name = list->objects[i].name;
+
+		if (chunk_belongs_to(chunk_name, name)) {
+			char url[SWIFT_MAX_URL_SIZE];
+
+			snprintf(url, sizeof(url), "%s/%s/%s",
+				 auth->url, container, chunk_name);
+
+			if (!swift_delete_object(auth, url)) {
+				fprintf(stderr, "error: failed to delete "
+						"chunk %s\n", chunk_name);
+				container_list_free(list);
+				return(CURLE_FAILED_INIT);
+			}
+		}
+	}
+
+	container_list_free(list);
+
+	return(CURLE_OK);
+}
+
 /*********************************************************************//**
 Check if backup with given name exists.
 @return	true if backup exists */
@@ -2408,13 +2501,25 @@ int main(int argc, char **argv)
 			return(EXIT_FAILURE);
 		}
 
-	} else {
+	} else if (opt_mode == MODE_GET) {
 
 		if (swift_download(&info, opt_swift_container, opt_name)
 				   != CURLE_OK) {
 			fprintf(stderr, "download failed\n");
 			return(EXIT_FAILURE);
 		}
+
+	} else if (opt_mode == MODE_DELETE) {
+
+		if (swift_delete(&info, opt_swift_container, opt_name)
+				   != CURLE_OK) {
+			fprintf(stderr, "delete failed\n");
+			return(EXIT_FAILURE);
+		}
+
+	} else {
+		fprintf(stderr, "Unknown command supplied.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	curl_global_cleanup();
