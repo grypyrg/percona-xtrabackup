@@ -794,11 +794,13 @@ static void mcode_or_die(const char *where, CURLMcode code)
 			break;
 		case CURLM_BAD_SOCKET:
 			s = "CURLM_BAD_SOCKET";
-			fprintf(stderr, "error: %s returns %s\n", where, s);
+			fprintf(stderr, "error: %s returns (%d) %s\n",
+				where, code, s);
 			/* ignore this error */
 			return;
 		}
-		fprintf(stderr, "error: %s returns %s\n", where, s);
+		fprintf(stderr, "error: %s returns (%d) %s\n",
+			where, code, s);
 		assert(0);
 	}
 }
@@ -813,8 +815,10 @@ static void event_cb(EV_P_ struct ev_io *w, int revents)
 	int action = (revents & EV_READ  ? CURL_POLL_IN  : 0) |
 		(revents & EV_WRITE ? CURL_POLL_OUT : 0);
 
-	rc = curl_multi_socket_action(global->multi, w->fd, action,
-				      &global->still_running);
+	do {
+		rc = curl_multi_socket_action(global->multi, w->fd, action,
+					      &global->still_running);
+	} while (rc == CURLM_CALL_MULTI_PERFORM);
 #else
 	do {
 		rc = curl_multi_socket(global->multi, w->fd,
@@ -889,8 +893,11 @@ static void timer_cb(EV_P_ struct ev_timer *w, int revents)
 	CURLMcode rc;
 
 #if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
-	rc = curl_multi_socket_action(io_global->multi, CURL_SOCKET_TIMEOUT, 0,
-				      &io_global->still_running);
+	do {
+		rc = curl_multi_socket_action(io_global->multi,
+					      CURL_SOCKET_TIMEOUT, 0,
+					      &io_global->still_running);
+	} while (rc == CURLM_CALL_MULTI_PERFORM);
 #else
 	do {
 		rc = curl_multi_socket_all(io_global->multi,
@@ -1275,8 +1282,8 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	ulong i;
 #if !((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
 	long timeout;
-	CURLMcode rc;
 #endif
+	CURLMcode rc;
 
 	memset(&io_global, 0, sizeof(io_global));
 
@@ -1306,8 +1313,11 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 #endif
 
 #if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
-	curl_multi_socket_action(io_global.multi, CURL_SOCKET_TIMEOUT, 0,
-				 &io_global.still_running);
+	do {
+		rc = curl_multi_socket_action(io_global.multi,
+					      CURL_SOCKET_TIMEOUT, 0,
+					      &io_global.still_running);
+	} while (rc == CURLM_CALL_MULTI_PERFORM);
 #else
 	do {
 		rc = curl_multi_socket_all(io_global.multi, &io_global.still_running);
@@ -1320,8 +1330,11 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	for (i = 0; i < opt_parallel; i++) {
 		connection_info *conn = io_global.connections[i];
 		if (conn->upload_size != conn->filled_size) {
-			fprintf(stderr, "upload failed: data left in the buffer\n");
-			return 1;
+			fprintf(stderr, "upload failed: %lu bytes left \
+				in the buffer %s\n",
+				(ulong)(conn->filled_size - conn->upload_size),
+				conn->name);
+			return(EXIT_FAILURE);
 		}
 	}
 
