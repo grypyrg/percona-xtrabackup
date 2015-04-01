@@ -99,10 +99,10 @@ struct connection_info_struct {
 	bool chunk_uploaded;
 	char error[CURL_ERROR_SIZE];
 	struct curl_slist *slist;
-	char *url;
-	char *container;
-	char *token;
-	char *backup_name;
+	const char *url;
+	const char *container;
+	const char *token;
+	const char *backup_name;
 	char *name;
 	gcry_md_hd_t md5;
 	char hash[33];
@@ -317,6 +317,7 @@ static struct my_option my_long_options[] =
 };
 
 static map<string, ulonglong> file_chunk_count;
+static map<string, connection_info*> uploaded_connections;
 
 static
 slo_manifest *slo_manifest_init()
@@ -875,6 +876,19 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 	socket_info *fdp = (socket_info*)(sockp);
 
 	if (what == CURL_POLL_REMOVE) {
+		connection_info *conn;
+		uint i;
+
+		for (i = 0; i < opt_parallel; i++) {
+			conn = global->connections[i];
+			if (conn->easy == easy && !conn->chunk_uploaded) {
+				fprintf(stderr, "error: chunk '%s' is not "
+					"uploaded, but socket closed\n",
+					conn->name);
+				exit(EXIT_FAILURE);
+			}
+		}
+
 		remsock(fdp, global);
 	} else {
 		if (!fdp) {
@@ -910,6 +924,10 @@ static void timer_cb(EV_P_ struct ev_timer *w, int revents)
 
 static int conn_upload_init(connection_info *conn);
 static void conn_buffer_updated(connection_info *conn);
+static connection_info *conn_new(const char *url, const char *container,
+				 const char *name, const char *token,
+				 global_io_info *global);
+static void conn_cleanup(connection_info *conn);
 
 static connection_info *get_current_connection(global_io_info *global)
 {
@@ -921,7 +939,17 @@ static connection_info *get_current_connection(global_io_info *global)
 
 	for (i = 0; i < opt_parallel; i++) {
 		conn = global->connections[i];
-		if (conn->filled_size == 0 || conn->chunk_uploaded) {
+		if (conn->chunk_uploaded) {
+			global->connections[i] = conn =
+				conn_new(conn->url, conn->container,
+					conn->backup_name,
+					conn->token, global);
+
+			global->current_connection = conn;
+			conn_upload_init(conn);
+			return conn;
+		}
+		if (conn->filled_size == 0) {
 			global->current_connection = conn;
 			conn_upload_init(conn);
 			return conn;
@@ -954,6 +982,10 @@ static void input_cb(EV_P_ struct ev_io *w, int revents)
 				conn_buffer_updated(conn);
 			} else if (nbytes < 0) {
 				if (errno != EAGAIN && errno != EINTR) {
+					char error[200];
+					strerror_r(errno, error, sizeof(error));
+					fprintf(stderr, "error: failed to read "
+						"input stream (%s)\n", error);
 					/* failed to read input */
 					exit(1);
 				}
@@ -1036,6 +1068,13 @@ size_t upload_header_read_cb(char *ptr, size_t size, size_t nmemb,
 	    strcmp(etag, conn->hash) != 0) {
 	    	/* TODO: md5 comparison should be smart to handle delayed
 	    	responses from server */
+		connection_info *conn = uploaded_connections[etag];
+		if (conn == NULL) {
+			fprintf(stderr, "error: unmatched MD5 %s\n", etag);
+			exit(EXIT_FAILURE);
+		}
+		conn_cleanup(conn);
+		uploaded_connections.erase(etag);
 	}
 
 	return nmemb * size;
@@ -1060,6 +1099,7 @@ static int conn_upload_init(connection_info *conn)
 static int conn_upload_start(connection_info *conn)
 {
 	char object_url[SWIFT_MAX_URL_SIZE];
+	char content_len[200];
 	CURLMcode rc;
 
 	file_chunk_count[conn->name]++;
@@ -1067,6 +1107,11 @@ static int conn_upload_start(connection_info *conn)
 	snprintf(object_url, array_elements(object_url), "%s/%s/%s/%s.%020llu",
 		 conn->url, conn->container, conn->backup_name, conn->name,
 		 file_chunk_count[conn->name]);
+
+	snprintf(content_len, sizeof(content_len), "Content-Length: %lu",
+		(ulong)(conn->chunk_size));
+
+	conn->slist = curl_slist_append(conn->slist, content_len);
 
 	conn->easy = curl_easy_init();
 	if (!conn->easy) {
@@ -1111,10 +1156,6 @@ static int conn_upload_start(connection_info *conn)
 static void conn_cleanup(connection_info *conn)
 {
 	if (conn) {
-		free(conn->url);
-		free(conn->container);
-		free(conn->token);
-		free(conn->backup_name);
 		free(conn->name);
 		free(conn->buffer);
 		if (conn->easy)
@@ -1134,14 +1175,10 @@ static connection_info *conn_new(const char *url, const char *container,
 
 	conn = (connection_info *)(calloc(1, sizeof(connection_info)));
 	if (conn != NULL) {
-		if ((conn->url = strdup(url)) == NULL)
-			goto error;
-		if ((conn->container = strdup(container)) == NULL)
-			goto error;
-		if ((conn->token = strdup(token)) == NULL)
-			goto error;
-		if ((conn->backup_name = strdup(name)) == NULL)
-			goto error;
+		conn->url = url;
+		conn->container = container;
+		conn->token = token;
+		conn->backup_name = name;
 		if (gcry_md_open(&conn->md5, GCRY_MD_MD5, 0) != 0)
 			goto error;
 		conn->global = global;
@@ -1155,8 +1192,6 @@ static connection_info *conn_new(const char *url, const char *container,
 		conn->slist = curl_slist_append(conn->slist, token_header);
 		conn->slist = curl_slist_append(conn->slist,
 						"Connection: keep-alive");
-		conn->slist = curl_slist_append(conn->slist,
-						"Content-Length: 0");
 		conn->slist = curl_slist_append(conn->slist,
 						"Content-Type: "
 						"application/octet-stream");
@@ -1284,6 +1319,7 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	long timeout;
 #endif
 	CURLMcode rc;
+	int n_dirty_buffers;
 
 	memset(&io_global, 0, sizeof(io_global));
 
@@ -1327,15 +1363,19 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	ev_loop(io_global.loop, 0);
 	curl_multi_cleanup(io_global.multi);
 
+	n_dirty_buffers = 0;
 	for (i = 0; i < opt_parallel; i++) {
 		connection_info *conn = io_global.connections[i];
 		if (conn->upload_size != conn->filled_size) {
-			fprintf(stderr, "upload failed: %lu bytes left \
-				in the buffer %s\n",
+			fprintf(stderr, "upload failed: %lu bytes left "
+				"in the buffer %s (uploaded = %d)\n",
 				(ulong)(conn->filled_size - conn->upload_size),
-				conn->name);
-			return(EXIT_FAILURE);
+				conn->name, conn->chunk_uploaded);
+			++n_dirty_buffers;
 		}
+	}
+	if (n_dirty_buffers > 0) {
+		return(EXIT_FAILURE);
 	}
 
 	qsort(io_global.manifest->chunks.buffer,
