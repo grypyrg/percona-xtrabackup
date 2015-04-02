@@ -23,9 +23,13 @@ load_dbase_schema sakila
 load_dbase_data sakila
 
 now=$(date +%s)
+pwdpart=$(pwd | sed 's/\//-/g')
 
-full_backup_name=${now}-full_backup
-inc_backup_name=${now}-inc_backup
+full_backup_name=${now}-${pwdpart}-full_backup
+inc_backup_name=${now}-${pwdpart}-inc_backup
+
+echo ${full_backup_name}
+echo ${inc_backup_name}
 
 full_backup_dir=$topdir/${full_backup_name}
 inc_backup_dir=$topdir/${inc_backup_name}
