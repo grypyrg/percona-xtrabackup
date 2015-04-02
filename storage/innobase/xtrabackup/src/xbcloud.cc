@@ -1758,7 +1758,7 @@ List swift container with given name. Return list of objects sorted by
 object name. */
 static
 container_list *
-swift_list(swift_auth_info *auth, const char *container)
+swift_list(swift_auth_info *auth, const char *container, const char *path)
 {
 	container_list *list;
 	char url[SWIFT_MAX_URL_SIZE];
@@ -1766,8 +1766,9 @@ swift_list(swift_auth_info *auth, const char *container)
 	list = container_list_new();
 
 	/* download the list in json format */
-	snprintf(url, array_elements(url), "%s/%s?format=json",
-		 auth->url, container);
+	snprintf(url, array_elements(url), "%s/%s?format=json%s%s",
+		 auth->url, container, path ? "&prefix=" : "",
+		 path ? path : "");
 	list->content_json = swift_fetch_into_buffer(auth, url,
 			&list->content_json, &list->content_bufsize,
 			&list->content_length,
@@ -1841,7 +1842,7 @@ int swift_download(swift_auth_info *auth, const char *container,
 	size_t buf_size = 0;
 	size_t result_len = 0;
 
-	if ((list = swift_list(auth, container)) == NULL) {
+	if ((list = swift_list(auth, container, name)) == NULL) {
 		return(CURLE_FAILED_INIT);
 	}
 
@@ -1885,7 +1886,7 @@ bool swift_delete(swift_auth_info *auth, const char *container,
 {
 	container_list *list;
 
-	if ((list = swift_list(auth, container)) == NULL) {
+	if ((list = swift_list(auth, container, name)) == NULL) {
 		return(CURLE_FAILED_INIT);
 	}
 
@@ -1921,7 +1922,7 @@ bool swift_backup_exists(swift_auth_info *auth, const char *container,
 {
 	container_list *list;
 
-	if ((list = swift_list(auth, container)) == NULL) {
+	if ((list = swift_list(auth, container, backup_name)) == NULL) {
 		fprintf(stderr, "Error: unable to list container %s\n",
 			container);
 		exit(EXIT_FAILURE);
