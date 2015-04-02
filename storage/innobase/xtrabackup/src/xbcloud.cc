@@ -1661,73 +1661,90 @@ swift_parse_container_list(container_list *list)
 		return(false);
 	}
 
-	/*
-	[
-		{
-			"hash": string,
-			"bytes": number,
-			"name": string
-		},
-		...
-	]
-	*/
+	enum {MAX_DEPTH=20};
+	enum label_t {NONE, OBJECT};
 
-	jsmntok_t *tokens = json_tokenise(list->content_json,
-					  list->content_length,
-					  list->object_count * 10);
+	char name[SWIFT_MAX_URL_SIZE];
+	char hash[33];
+	char bytes[30];
+	ulong idx = 0;
+	char *response = list->content_json;
 
-	int object_idx = 0;
+	struct stack_t {
+		jsmntok_t *t;
+		int n_items;
+		label_t label;
+	};
 
-	if (tokens[0].type != JSMN_ARRAY) {
-		fprintf(stderr, "error: malformed response "
-				"(array expected)\n");
-		return(false);
-	}
+	stack_t stack[MAX_DEPTH];
+	jsmntok_t *tokens;
+	int level;
 
-	for (int i = 1; object_idx < tokens[0].size; i++, object_idx++) {
+	tokens = json_tokenise(list->content_json, list->content_length, 200);
+
+	stack[0].t = &tokens[0];
+	stack[0].label = NONE;
+	stack[0].n_items = 1;
+	level = 0;
+
+	for (size_t i = 0, j = 1; j > 0; i++, j--) {
 		jsmntok_t *t = &tokens[i];
 
-		if (t->type != JSMN_OBJECT) {
-			fprintf(stderr, "error: malformed response "
-					"(object expected)\n");
-			return(false);
+		assert(t->start != -1 && t->end != -1);
+		assert(level >= 0);
+
+		--stack[level].n_items;
+
+		switch (t->type) {
+		case JSMN_ARRAY:
+		case JSMN_OBJECT:
+			if (level < MAX_DEPTH - 1) {
+				level++;
+			}
+			stack[level].t = t;
+			stack[level].label = NONE;
+			if (t->type == JSMN_ARRAY) {
+				stack[level].n_items = t->size;
+				j += t->size;
+			} else {
+				stack[level].n_items = t->size * 2;
+				j += t->size * 2;
+			}
+			break;
+		case JSMN_PRIMITIVE:
+		case JSMN_STRING:
+			if (stack[level].t->type == JSMN_OBJECT &&
+			    stack[level].n_items % 2 == 1) {
+				/* key */
+				if (json_token_eq(response, t, "name")) {
+					json_token_str(response, &tokens[i + 1],
+							name, sizeof(name));
+				}
+				if (json_token_eq(response, t, "hash")) {
+					json_token_str(response, &tokens[i + 1],
+							hash, sizeof(hash));
+				}
+				if (json_token_eq(response, t, "bytes")) {
+					json_token_str(response, &tokens[i + 1],
+							bytes, sizeof(bytes));
+				}
+			}
+			break;
 		}
 
-		for (int j = i + 1; j <= i + t->size * 2; j += 2) {
-			jsmntok_t *key = &tokens[j];
-			jsmntok_t *val = &tokens[j + 1];
-			if (key->type != JSMN_STRING) {
-				fprintf(stderr, "error: malformed response "
-						"(string expected)\n");
-				return(false);
-			}
-			if (json_token_eq(list->content_json, key, "hash")) {
-				if (val->end - val->start != 32) {
-					fprintf(stderr, "error: malformed "
-							"response "
-							"(hash must be 32 "
-							"chars long)\n");
-					return(false);
-				}
-				json_token_str(list->content_json, val,
-					       list->objects[object_idx].hash,
-					       33);
-			}
-			if (json_token_eq(list->content_json, key, "name")) {
-				json_token_str(list->content_json, val,
-					       list->objects[object_idx].name,
-					       SWIFT_MAX_URL_SIZE);
-			}
-			if (json_token_eq(list->content_json, key, "bytes")) {
-				char bytes_str[40];
+		while (stack[level].n_items == 0 && level > 0) {
+			if (stack[level].t->type == JSMN_OBJECT
+			    && level == 2) {
 				char *endptr;
-				json_token_str(list->content_json, val,
-					       bytes_str, sizeof(bytes_str));
-				list->objects[object_idx].bytes =
-					strtoull(bytes_str, &endptr, 10);
+				assert(idx <= list->object_count);
+				strcpy(list->objects[idx].name, name);
+				strcpy(list->objects[idx].hash, hash);
+				list->objects[idx].bytes =
+						strtoull(bytes, &endptr, 10);
+				++idx;
 			}
+			--level;
 		}
-		i += t->size * 2;
 	}
 
 	qsort(list->objects, list->object_count,
