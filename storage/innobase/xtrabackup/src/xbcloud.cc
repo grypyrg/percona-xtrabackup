@@ -104,7 +104,6 @@ struct connection_info_struct {
 	const char *token;
 	const char *backup_name;
 	char *name;
-	gcry_md_hd_t md5;
 	char hash[33];
 	size_t chunk_no;
 	bool magic_verified;
@@ -112,6 +111,7 @@ struct connection_info_struct {
 	xb_chunk_type_t chunk_type;
 	size_t payload_size;
 	size_t chunk_size;
+	int retry_count;
 	bool upload_started;
 };
 
@@ -138,7 +138,9 @@ struct container_list_struct {
 	size_t content_bufsize;
 	char *content_json;
 	size_t object_count;
+	size_t idx;
 	object_info *objects;
+	bool final;
 };
 
 enum {SWIFT, S3};
@@ -743,6 +745,14 @@ cleanup:
 	return ret;
 }
 
+static int conn_upload_init(connection_info *conn);
+static void conn_buffer_updated(connection_info *conn);
+static connection_info *conn_new(const char *url, const char *container,
+				 const char *name, const char *token,
+				 global_io_info *global);
+static void conn_cleanup(connection_info *conn);
+static void conn_upload_retry(connection_info *conn);
+
 /* Check for completed transfers, and remove their easy handles */
 static void check_multi_info(global_io_info *g)
 {
@@ -885,7 +895,7 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 				fprintf(stderr, "error: chunk '%s' is not "
 					"uploaded, but socket closed\n",
 					conn->name);
-				exit(EXIT_FAILURE);
+				conn_upload_retry(conn);
 			}
 		}
 
@@ -921,13 +931,6 @@ static void timer_cb(EV_P_ struct ev_timer *w, int revents)
 	mcode_or_die("timer_cb: curl_multi_socket_action", rc);
 	check_multi_info(io_global);
 }
-
-static int conn_upload_init(connection_info *conn);
-static void conn_buffer_updated(connection_info *conn);
-static connection_info *conn_new(const char *url, const char *container,
-				 const char *name, const char *token,
-				 global_io_info *global);
-static void conn_cleanup(connection_info *conn);
 
 static connection_info *get_current_connection(global_io_info *global)
 {
@@ -975,9 +978,6 @@ static void input_cb(EV_P_ struct ev_io *w, int revents)
 					      conn->chunk_size -
 					      conn->filled_size);
 			if (nbytes > 0) {
-				gcry_md_write(conn->md5,
-					      conn->buffer + conn->filled_size,
-					      nbytes);
 				conn->filled_size += nbytes;
 				conn_buffer_updated(conn);
 			} else if (nbytes < 0) {
@@ -1016,9 +1016,6 @@ static int swift_upload_read_cb(char *ptr, size_t size, size_t nmemb,
 				      conn->chunk_size - conn->filled_size);
 		} while (nbytes == -1 && errno == EAGAIN);
 		if (nbytes > 0) {
-			gcry_md_write(conn->md5,
-				      conn->buffer + conn->filled_size,
-				      nbytes);
 			conn->filled_size += nbytes;
 			conn_buffer_updated(conn);
 		} else {
@@ -1034,19 +1031,6 @@ static int swift_upload_read_cb(char *ptr, size_t size, size_t nmemb,
 	if (conn->upload_size == conn->chunk_size ||
 	    (conn->global->eof && conn->upload_size == conn->filled_size)) {
 		if (!conn->chunk_uploaded && realsize == 0) {
-			slo_chunk chunk;
-
-			hex_md5(gcry_md_read(conn->md5, GCRY_MD_MD5),
-				conn->hash);
-			gcry_md_reset(conn->md5);
-			chunk.idx = conn->chunk_no;
-			strcpy(chunk.md5, conn->hash);
-			sprintf(chunk.name, "%s/%s-%020zu", conn->container,
-				conn->name,
-				conn->chunk_no);
-			chunk.size = conn->upload_size;
-			slo_add_chunk(conn->global->manifest, &chunk);
-
 			conn->chunk_uploaded = true;
 		}
 	}
@@ -1091,7 +1075,7 @@ static int conn_upload_init(connection_info *conn)
 	conn->chunk_type = XB_CHUNK_TYPE_UNKNOWN;
 	conn->payload_size = 0;
 	conn->upload_started = false;
-	conn->chunk_no = conn->global->chunk_no++;
+	conn->retry_count = 0;
 
 	return 0;
 }
@@ -1101,12 +1085,27 @@ static int conn_upload_start(connection_info *conn)
 	char object_url[SWIFT_MAX_URL_SIZE];
 	char content_len[200];
 	CURLMcode rc;
+	gcry_md_hd_t md5;
+	slo_chunk chunk;
 
-	file_chunk_count[conn->name]++;
+	gcry_md_open(&md5, GCRY_MD_MD5, 0);
+	gcry_md_write(md5, conn->buffer, conn->chunk_size);
+	hex_md5(gcry_md_read(md5, GCRY_MD_MD5), conn->hash);
+	gcry_md_close(md5);
 
-	snprintf(object_url, array_elements(object_url), "%s/%s/%s/%s.%020llu",
+	chunk.idx = conn->chunk_no;
+	strcpy(chunk.md5, conn->hash);
+	sprintf(chunk.name, "%s/%s-%020zu", conn->container, conn->name,
+		conn->chunk_no);
+	chunk.size = conn->chunk_size;
+	slo_add_chunk(conn->global->manifest, &chunk);
+
+	fprintf(stderr, "uploading chunk %zu of '%s' with MD5 %s\n",
+		conn->chunk_no, conn->name, conn->hash);
+
+	snprintf(object_url, array_elements(object_url), "%s/%s/%s/%s.%020zu",
 		 conn->url, conn->container, conn->backup_name, conn->name,
-		 file_chunk_count[conn->name]);
+		 conn->chunk_no);
 
 	snprintf(content_len, sizeof(content_len), "Content-Length: %lu",
 		(ulong)(conn->chunk_size));
@@ -1158,12 +1157,29 @@ static void conn_cleanup(connection_info *conn)
 	if (conn) {
 		free(conn->name);
 		free(conn->buffer);
-		if (conn->easy)
+		if (conn->easy) {
 			curl_easy_cleanup(conn->easy);
-		if (conn->md5)
-			gcry_md_close(conn->md5);
+		}
 	}
 	free(conn);
+}
+
+static void conn_upload_retry(connection_info *conn)
+{
+	/* already closed by cURL */
+	conn->easy = NULL;
+
+	if (conn->retry_count++ > 3) {
+		fprintf(stderr, "error: retry count limit reached\n");
+		exit(EXIT_FAILURE);
+	}
+
+	fprintf(stderr, "warning: retrying to upload chunk %zu of '%s'\n",
+		conn->chunk_no, conn->name);
+
+	conn->upload_size = 0;
+
+	conn_upload_start(conn);
 }
 
 static connection_info *conn_new(const char *url, const char *container,
@@ -1179,8 +1195,7 @@ static connection_info *conn_new(const char *url, const char *container,
 		conn->container = container;
 		conn->token = token;
 		conn->backup_name = name;
-		if (gcry_md_open(&conn->md5, GCRY_MD_MD5, 0) != 0)
-			goto error;
+
 		conn->global = global;
 		conn->buffer_size = SWIFT_CHUNK_SIZE;
 		if ((conn->buffer = (char *)(calloc(conn->buffer_size, 1))) ==
@@ -1258,7 +1273,6 @@ conn_buffer_updated(connection_info *conn)
 			      (char *)(realloc(conn->buffer, conn->chunk_size));
 			conn->buffer_size = conn->chunk_size;
 		}
-		ready_for_upload = true;
 	}
 
 	/* EOF chunk has no payload */
@@ -1272,11 +1286,15 @@ conn_buffer_updated(connection_info *conn)
 		memcpy(conn->name, conn->buffer + CHUNK_HEADER_CONSTANT_LEN,
 			conn->chunk_path_len);
 		conn->name[conn->chunk_path_len] = 0;
+	}
+
+	if (conn->filled_size > 0 && conn->filled_size == conn->chunk_size) {
 		ready_for_upload = true;
 	}
 
 	/* start upload once recieved the size of the chunk */
 	if (!conn->upload_started && ready_for_upload) {
+		conn->chunk_no = file_chunk_count[conn->name]++;
 		conn_upload_start(conn);
 	}
 }
@@ -1639,13 +1657,6 @@ json_token_str(const char *buf, jsmntok_t *t, char *out, int out_size)
 	return(true);
 }
 
-static
-int
-cmp_object_names(const void *c1, const void *c2)
-{
-	return(strcmp(((object_info*)(c1))->name, ((object_info*)(c2))->name));
-}
-
 /*********************************************************************//**
 Parse SWIFT container list response and fill output array with values
 sorted by object name. */
@@ -1653,21 +1664,12 @@ static
 bool
 swift_parse_container_list(container_list *list)
 {
-	list->objects =
-		(object_info*)(calloc(list->object_count, sizeof(object_info)));
-
-	if (list->objects == NULL) {
-		fprintf(stderr, "error: out of memory\n");
-		return(false);
-	}
-
 	enum {MAX_DEPTH=20};
 	enum label_t {NONE, OBJECT};
 
 	char name[SWIFT_MAX_URL_SIZE];
 	char hash[33];
 	char bytes[30];
-	ulong idx = 0;
 	char *response = list->content_json;
 
 	struct stack_t {
@@ -1679,6 +1681,7 @@ swift_parse_container_list(container_list *list)
 	stack_t stack[MAX_DEPTH];
 	jsmntok_t *tokens;
 	int level;
+	size_t count = 0;
 
 	tokens = json_tokenise(list->content_json, list->content_length, 200);
 
@@ -1686,6 +1689,16 @@ swift_parse_container_list(container_list *list)
 	stack[0].label = NONE;
 	stack[0].n_items = 1;
 	level = 0;
+
+	if (list->objects == NULL) {
+		list->objects = (object_info*)
+			(calloc(list->object_count, sizeof(object_info)));
+	}
+
+	if (list->objects == NULL) {
+		fprintf(stderr, "error: out of memory\n");
+		return(false);
+	}
 
 	for (size_t i = 0, j = 1; j > 0; i++, j--) {
 		jsmntok_t *t = &tokens[i];
@@ -1736,19 +1749,21 @@ swift_parse_container_list(container_list *list)
 			if (stack[level].t->type == JSMN_OBJECT
 			    && level == 2) {
 				char *endptr;
-				assert(idx <= list->object_count);
-				strcpy(list->objects[idx].name, name);
-				strcpy(list->objects[idx].hash, hash);
-				list->objects[idx].bytes =
+				assert(list->idx <= list->object_count);
+				strcpy(list->objects[list->idx].name, name);
+				strcpy(list->objects[list->idx].hash, hash);
+				list->objects[list->idx].bytes =
 						strtoull(bytes, &endptr, 10);
-				++idx;
+				++list->idx;
+				++count;
 			}
 			--level;
 		}
 	}
 
-	qsort(list->objects, list->object_count,
-		sizeof(object_info), cmp_object_names);
+	if (count == 0) {
+		list->final = true;
+	}
 
 	return(true);
 }
@@ -1765,24 +1780,32 @@ swift_list(swift_auth_info *auth, const char *container, const char *path)
 
 	list = container_list_new();
 
-	/* download the list in json format */
-	snprintf(url, array_elements(url), "%s/%s?format=json%s%s",
-		 auth->url, container, path ? "&prefix=" : "",
-		 path ? path : "");
-	list->content_json = swift_fetch_into_buffer(auth, url,
-			&list->content_json, &list->content_bufsize,
-			&list->content_length,
-			swift_container_list_header_cb, list);
-	if (list->content_json == NULL) {
-		container_list_free(list);
-		return(NULL);
-	}
+	while (!list->final) {
 
-	/* parse downloaded list */
-	if (!swift_parse_container_list(list)) {
-		fprintf(stderr, "error: unable to parse container list\n");
-		container_list_free(list);
-		return(NULL);
+		/* download the list in json format */
+		snprintf(url, array_elements(url), "%s/%s?format=json%s%s%s%s",
+			 auth->url, container, path ? "&prefix=" : "",
+			 path ? path : "", list->idx > 0 ? "&marker=" : "",
+			 list->idx > 0 ?
+			 	list->objects[list->idx - 1].name : "");
+
+		list->content_json = swift_fetch_into_buffer(auth, url,
+				&list->content_json, &list->content_bufsize,
+				&list->content_length,
+				swift_container_list_header_cb, list);
+
+		if (list->content_json == NULL) {
+			container_list_free(list);
+			return(NULL);
+		}
+
+		/* parse downloaded list */
+		if (!swift_parse_container_list(list)) {
+			fprintf(stderr, "error: unable to parse "
+					"container list\n");
+			container_list_free(list);
+			return(NULL);
+		}
 	}
 
 	return(list);
@@ -1846,7 +1869,7 @@ int swift_download(swift_auth_info *auth, const char *container,
 		return(CURLE_FAILED_INIT);
 	}
 
-	for (size_t i = 0; i < list->object_count; i++) {
+	for (size_t i = 0; i < list->idx; i++) {
 		const char *chunk_name = list->objects[i].name;
 
 		if (chunk_belongs_to(chunk_name, name)
