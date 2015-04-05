@@ -47,7 +47,7 @@ using std::string;
 #define SWIFT_MAX_URL_SIZE 8192
 #define SWIFT_MAX_HDR_SIZE 8192
 
-#define SWIFT_CHUNK_SIZE 10485760
+#define SWIFT_CHUNK_SIZE 11 * 1024 * 1024
 
 /*****************************************************************************/
 
@@ -843,12 +843,13 @@ static void event_cb(EV_P_ struct ev_io *w, int revents)
 	}
 }
 
-static void remsock(socket_info *fdp, global_io_info *global)
+static void remsock(curl_socket_t s, socket_info *fdp, global_io_info *global)
 {
 	if (fdp) {
 		if (fdp->evset)
 			ev_io_stop(global->loop, &fdp->ev);
 		free(fdp);
+		curl_multi_assign(global->multi, s, NULL);
 	}
 }
 
@@ -899,7 +900,7 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 			}
 		}
 
-		remsock(fdp, global);
+		remsock(s, fdp, global);
 	} else {
 		if (!fdp) {
 			addsock(s, easy, what, global);
@@ -1032,6 +1033,7 @@ static int swift_upload_read_cb(char *ptr, size_t size, size_t nmemb,
 	    (conn->global->eof && conn->upload_size == conn->filled_size)) {
 		if (!conn->chunk_uploaded && realsize == 0) {
 			conn->chunk_uploaded = true;
+			uploaded_connections[conn->hash] = conn;
 		}
 	}
 
@@ -1080,11 +1082,8 @@ static int conn_upload_init(connection_info *conn)
 	return 0;
 }
 
-static int conn_upload_start(connection_info *conn)
+static void conn_upload_prepare(connection_info *conn)
 {
-	char object_url[SWIFT_MAX_URL_SIZE];
-	char content_len[200];
-	CURLMcode rc;
 	gcry_md_hd_t md5;
 	slo_chunk chunk;
 
@@ -1099,6 +1098,14 @@ static int conn_upload_start(connection_info *conn)
 		conn->chunk_no);
 	chunk.size = conn->chunk_size;
 	slo_add_chunk(conn->global->manifest, &chunk);
+}
+
+static int conn_upload_start(connection_info *conn)
+{
+	char token_header[SWIFT_MAX_HDR_SIZE];
+	char object_url[SWIFT_MAX_URL_SIZE];
+	char content_len[200];
+	CURLMcode rc;
 
 	fprintf(stderr, "uploading chunk %zu of '%s' with MD5 %s\n",
 		conn->chunk_no, conn->name, conn->hash);
@@ -1110,6 +1117,15 @@ static int conn_upload_start(connection_info *conn)
 	snprintf(content_len, sizeof(content_len), "Content-Length: %lu",
 		(ulong)(conn->chunk_size));
 
+	snprintf(token_header, array_elements(token_header),
+		 "X-Auth-Token: %s", conn->token);
+
+	conn->slist = curl_slist_append(conn->slist, token_header);
+	conn->slist = curl_slist_append(conn->slist,
+					"Connection: keep-alive");
+	conn->slist = curl_slist_append(conn->slist,
+					"Content-Type: "
+					"application/octet-stream");
 	conn->slist = curl_slist_append(conn->slist, content_len);
 
 	conn->easy = curl_easy_init();
@@ -1187,34 +1203,36 @@ static connection_info *conn_new(const char *url, const char *container,
 				 global_io_info *global)
 {
 	connection_info *conn;
-	char token_header[SWIFT_MAX_HDR_SIZE];
 
 	conn = (connection_info *)(calloc(1, sizeof(connection_info)));
-	if (conn != NULL) {
-		conn->url = url;
-		conn->container = container;
-		conn->token = token;
-		conn->backup_name = name;
-
-		conn->global = global;
-		conn->buffer_size = SWIFT_CHUNK_SIZE;
-		if ((conn->buffer = (char *)(calloc(conn->buffer_size, 1))) ==
-		    NULL)
-			goto error;
-		conn->filled_size = 0;
-		snprintf(token_header, array_elements(token_header),
-			 "X-Auth-Token: %s", token);
-		conn->slist = curl_slist_append(conn->slist, token_header);
-		conn->slist = curl_slist_append(conn->slist,
-						"Connection: keep-alive");
-		conn->slist = curl_slist_append(conn->slist,
-						"Content-Type: "
-						"application/octet-stream");
+	if (conn == NULL) {
+		goto error;
 	}
 
+	conn->url = url;
+	conn->container = container;
+	conn->token = token;
+	conn->backup_name = name;
+
+	conn->global = global;
+	conn->buffer_size = SWIFT_CHUNK_SIZE;
+	if ((conn->buffer = (char *)(calloc(conn->buffer_size, 1))) ==
+	    NULL) {
+		goto error;
+	}
+	conn->filled_size = 0;
+
 	return conn;
+
 error:
-	conn_cleanup(conn);
+	if (conn != NULL) {
+		conn_cleanup(conn);
+	}
+
+	fprintf(stderr, "out of memory (%d) objects pending response\n",
+		(int) uploaded_connections.size());
+	exit(EXIT_FAILURE);
+
 	return NULL;
 }
 
@@ -1295,6 +1313,7 @@ conn_buffer_updated(connection_info *conn)
 	/* start upload once recieved the size of the chunk */
 	if (!conn->upload_started && ready_for_upload) {
 		conn->chunk_no = file_chunk_count[conn->name]++;
+		conn_upload_prepare(conn);
 		conn_upload_start(conn);
 	}
 }
@@ -1401,6 +1420,8 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	      sizeof(slo_chunk), cmp_chunks);
 
 	slo_manifest_free(io_global.manifest);
+
+	assert(uploaded_connections.size() == 0);
 
 	return 0;
 }

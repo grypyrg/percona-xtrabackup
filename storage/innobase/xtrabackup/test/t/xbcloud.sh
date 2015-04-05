@@ -40,7 +40,7 @@ xtrabackup --backup --stream=xbstream --extra-lsndir=$full_backup_dir \
 	--target-dir=$full_backup_dir | xbcloud put \
 	--swift-container=test_backup \
 	${XBCLOUD_CREDENTIALS} \
-	--parallel=10 \
+	--parallel=4 \
 	${full_backup_name}
 
 vlog "take incremental backup"
