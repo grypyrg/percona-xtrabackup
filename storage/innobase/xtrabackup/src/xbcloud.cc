@@ -941,6 +941,10 @@ static connection_info *get_current_connection(global_io_info *global)
 	if (conn && conn->filled_size < conn->chunk_size)
 		return conn;
 
+	if (uploaded_connections.size() > opt_parallel * 3) {
+		return NULL;
+	}
+
 	for (i = 0; i < opt_parallel; i++) {
 		conn = global->connections[i];
 		if (conn->chunk_uploaded) {
@@ -1047,13 +1051,10 @@ static
 size_t upload_header_read_cb(char *ptr, size_t size, size_t nmemb,
 			     void *data)
 {
-	connection_info *conn = (connection_info*)(data);
 	char etag[33];
 
-	if (get_http_header("Etag: ", ptr, etag, array_elements(etag)) &&
-	    strcmp(etag, conn->hash) != 0) {
-	    	/* TODO: md5 comparison should be smart to handle delayed
-	    	responses from server */
+	if (get_http_header("Etag: ", ptr, etag, array_elements(etag))) {
+		fprintf(stderr, "acked chunk %s\n", etag);
 		connection_info *conn = uploaded_connections[etag];
 		if (conn == NULL) {
 			fprintf(stderr, "error: unmatched MD5 %s\n", etag);
@@ -1173,9 +1174,6 @@ static void conn_cleanup(connection_info *conn)
 	if (conn) {
 		free(conn->name);
 		free(conn->buffer);
-		if (conn->easy) {
-			curl_easy_cleanup(conn->easy);
-		}
 	}
 	free(conn);
 }
