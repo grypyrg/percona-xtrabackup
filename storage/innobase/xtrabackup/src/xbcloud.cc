@@ -848,7 +848,7 @@ static void remsock(curl_socket_t s, socket_info *fdp, global_io_info *global)
 	if (fdp) {
 		if (fdp->evset)
 			ev_io_stop(global->loop, &fdp->ev);
-		free(fdp);
+		// free(fdp);
 		curl_multi_assign(global->multi, s, NULL);
 	}
 }
@@ -893,9 +893,13 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 		for (i = 0; i < opt_parallel; i++) {
 			conn = global->connections[i];
 			if (conn->easy == easy && !conn->chunk_uploaded) {
-				fprintf(stderr, "error: chunk '%s' is not "
-					"uploaded, but socket closed\n",
-					conn->name);
+				fprintf(stderr, "error: chunk %zu '%s' %s "
+					"is not uploaded, but socket closed "
+					"(%zu bytes left to upload)\n",
+					conn->chunk_no,
+					conn->name,
+					conn->hash,
+					conn->chunk_size - conn->upload_size);
 				conn_upload_retry(conn);
 			}
 		}
@@ -941,7 +945,7 @@ static connection_info *get_current_connection(global_io_info *global)
 	if (conn && conn->filled_size < conn->chunk_size)
 		return conn;
 
-	if (uploaded_connections.size() > opt_parallel * 3) {
+	if (uploaded_connections.size() > opt_parallel * 2) {
 		return NULL;
 	}
 
@@ -1086,19 +1090,19 @@ static int conn_upload_init(connection_info *conn)
 static void conn_upload_prepare(connection_info *conn)
 {
 	gcry_md_hd_t md5;
-	slo_chunk chunk;
+	// slo_chunk chunk;
 
 	gcry_md_open(&md5, GCRY_MD_MD5, 0);
 	gcry_md_write(md5, conn->buffer, conn->chunk_size);
 	hex_md5(gcry_md_read(md5, GCRY_MD_MD5), conn->hash);
 	gcry_md_close(md5);
 
-	chunk.idx = conn->chunk_no;
-	strcpy(chunk.md5, conn->hash);
-	sprintf(chunk.name, "%s/%s-%020zu", conn->container, conn->name,
-		conn->chunk_no);
-	chunk.size = conn->chunk_size;
-	slo_add_chunk(conn->global->manifest, &chunk);
+	// chunk.idx = conn->chunk_no;
+	// strcpy(chunk.md5, conn->hash);
+	// sprintf(chunk.name, "%s/%s-%020zu", conn->container, conn->name,
+	// 	conn->chunk_no);
+	// chunk.size = conn->chunk_size;
+	// slo_add_chunk(conn->global->manifest, &chunk);
 }
 
 static int conn_upload_start(connection_info *conn)
@@ -1419,7 +1423,10 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 
 	slo_manifest_free(io_global.manifest);
 
-	assert(uploaded_connections.size() == 0);
+	if (uploaded_connections.size() != 0) {
+		fprintf(stderr, "upload failed %d chunks without confirmation "
+			"of creation\n", (int)(uploaded_connections.size()));
+	}
 
 	return 0;
 }
