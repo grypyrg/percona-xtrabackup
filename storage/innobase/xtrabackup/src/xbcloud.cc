@@ -56,7 +56,6 @@ typedef struct connection_info_struct connection_info;
 typedef struct socket_info_struct socket_info;
 typedef struct global_io_info_struct global_io_info;
 typedef struct slo_chunk_struct slo_chunk;
-typedef struct slo_manifest_struct slo_manifest;
 typedef struct container_list_struct container_list;
 typedef struct object_info_struct object_info;
 
@@ -76,7 +75,10 @@ struct global_io_info_struct {
 	connection_info **connections;
 	long chunk_no;
 	connection_info *current_connection;
-	slo_manifest *manifest;
+	const char *url;
+	const char *container;
+	const char *token;
+	const char *backup_name;
 };
 
 struct socket_info_struct {
@@ -99,10 +101,6 @@ struct connection_info_struct {
 	bool chunk_uploaded;
 	char error[CURL_ERROR_SIZE];
 	struct curl_slist *slist;
-	const char *url;
-	const char *container;
-	const char *token;
-	const char *backup_name;
 	char *name;
 	char hash[33];
 	size_t chunk_no;
@@ -113,6 +111,7 @@ struct connection_info_struct {
 	size_t chunk_size;
 	int retry_count;
 	bool upload_started;
+	ulong global_idx;
 };
 
 struct slo_chunk_struct {
@@ -120,11 +119,6 @@ struct slo_chunk_struct {
 	char md5[33];
 	int idx;
 	size_t size;
-};
-
-struct slo_manifest_struct {
-	DYNAMIC_ARRAY chunks;
-	size_t uploaded_idx;
 };
 
 struct object_info_struct {
@@ -319,33 +313,6 @@ static struct my_option my_long_options[] =
 };
 
 static map<string, ulonglong> file_chunk_count;
-static map<string, connection_info*> uploaded_connections;
-
-static
-slo_manifest *slo_manifest_init()
-{
-	slo_manifest *manifest = (slo_manifest *)(calloc(1,
-							 sizeof(slo_manifest)));
-	if (manifest != NULL) {
-		my_init_dynamic_array(&manifest->chunks, sizeof(slo_chunk), 50,
-				      50);
-	}
-	return manifest;
-}
-
-static
-int slo_add_chunk(slo_manifest *manifest, const slo_chunk *chunk)
-{
-	insert_dynamic(&manifest->chunks, chunk);
-	return 0;
-}
-
-static
-void slo_manifest_free(slo_manifest *manifest)
-{
-	delete_dynamic(&manifest->chunks);
-	free(manifest);
-}
 
 static
 void
@@ -747,9 +714,7 @@ cleanup:
 
 static int conn_upload_init(connection_info *conn);
 static void conn_buffer_updated(connection_info *conn);
-static connection_info *conn_new(const char *url, const char *container,
-				 const char *name, const char *token,
-				 global_io_info *global);
+static connection_info *conn_new(global_io_info *global, ulong global_idx);
 static void conn_cleanup(connection_info *conn);
 static void conn_upload_retry(connection_info *conn);
 
@@ -848,7 +813,7 @@ static void remsock(curl_socket_t s, socket_info *fdp, global_io_info *global)
 	if (fdp) {
 		if (fdp->evset)
 			ev_io_stop(global->loop, &fdp->ev);
-		// free(fdp);
+		free(fdp);
 		curl_multi_assign(global->multi, s, NULL);
 	}
 }
@@ -945,23 +910,9 @@ static connection_info *get_current_connection(global_io_info *global)
 	if (conn && conn->filled_size < conn->chunk_size)
 		return conn;
 
-	if (uploaded_connections.size() > opt_parallel * 2) {
-		return NULL;
-	}
-
 	for (i = 0; i < opt_parallel; i++) {
 		conn = global->connections[i];
-		if (conn->chunk_uploaded) {
-			global->connections[i] = conn =
-				conn_new(conn->url, conn->container,
-					conn->backup_name,
-					conn->token, global);
-
-			global->current_connection = conn;
-			conn_upload_init(conn);
-			return conn;
-		}
-		if (conn->filled_size == 0) {
+		if (conn->chunk_uploaded || conn->filled_size == 0) {
 			global->current_connection = conn;
 			conn_upload_init(conn);
 			return conn;
@@ -992,7 +943,8 @@ static void input_cb(EV_P_ struct ev_io *w, int revents)
 			} else if (nbytes < 0) {
 				if (errno != EAGAIN && errno != EINTR) {
 					char error[200];
-					strerror_r(errno, error, sizeof(error));
+					my_strerror(error, sizeof(error),
+						    errno);
 					fprintf(stderr, "error: failed to read "
 						"input stream (%s)\n", error);
 					/* failed to read input */
@@ -1037,14 +989,6 @@ static int swift_upload_read_cb(char *ptr, size_t size, size_t nmemb,
 	memcpy(ptr, conn->buffer + conn->upload_size, realsize);
 	conn->upload_size += realsize;
 
-	if (conn->upload_size == conn->chunk_size ||
-	    (conn->global->eof && conn->upload_size == conn->filled_size)) {
-		if (!conn->chunk_uploaded && realsize == 0) {
-			conn->chunk_uploaded = true;
-			uploaded_connections[conn->hash] = conn;
-		}
-	}
-
 	assert(conn->filled_size <= conn->chunk_size);
 	assert(conn->upload_size <= conn->filled_size);
 
@@ -1055,17 +999,16 @@ static
 size_t upload_header_read_cb(char *ptr, size_t size, size_t nmemb,
 			     void *data)
 {
+	connection_info *conn = (connection_info *)(data);
 	char etag[33];
 
 	if (get_http_header("Etag: ", ptr, etag, array_elements(etag))) {
-		fprintf(stderr, "acked chunk %s\n", etag);
-		connection_info *conn = uploaded_connections[etag];
-		if (conn == NULL) {
-			fprintf(stderr, "error: unmatched MD5 %s\n", etag);
+		if (strcmp(conn->hash, etag) != 0) {
+			fprintf(stderr, "etag mismatch\n");
 			exit(EXIT_FAILURE);
 		}
-		conn_cleanup(conn);
-		uploaded_connections.erase(etag);
+		fprintf(stderr, "acked chunk %s\n", etag);
+		conn->chunk_uploaded = true;
 	}
 
 	return nmemb * size;
@@ -1084,25 +1027,26 @@ static int conn_upload_init(connection_info *conn)
 	conn->upload_started = false;
 	conn->retry_count = 0;
 
+	if (conn->easy != NULL) {
+		conn->easy = 0;
+	}
+
+	if (conn->slist != NULL) {
+		curl_slist_free_all(conn->slist);
+		conn->slist = NULL;
+	}
+
 	return 0;
 }
 
 static void conn_upload_prepare(connection_info *conn)
 {
 	gcry_md_hd_t md5;
-	// slo_chunk chunk;
 
 	gcry_md_open(&md5, GCRY_MD_MD5, 0);
 	gcry_md_write(md5, conn->buffer, conn->chunk_size);
 	hex_md5(gcry_md_read(md5, GCRY_MD_MD5), conn->hash);
 	gcry_md_close(md5);
-
-	// chunk.idx = conn->chunk_no;
-	// strcpy(chunk.md5, conn->hash);
-	// sprintf(chunk.name, "%s/%s-%020zu", conn->container, conn->name,
-	// 	conn->chunk_no);
-	// chunk.size = conn->chunk_size;
-	// slo_add_chunk(conn->global->manifest, &chunk);
 }
 
 static int conn_upload_start(connection_info *conn)
@@ -1110,20 +1054,23 @@ static int conn_upload_start(connection_info *conn)
 	char token_header[SWIFT_MAX_HDR_SIZE];
 	char object_url[SWIFT_MAX_URL_SIZE];
 	char content_len[200];
+	global_io_info *global;
 	CURLMcode rc;
+
+	global = conn->global;
 
 	fprintf(stderr, "uploading chunk %zu of '%s' with MD5 %s\n",
 		conn->chunk_no, conn->name, conn->hash);
 
 	snprintf(object_url, array_elements(object_url), "%s/%s/%s/%s.%020zu",
-		 conn->url, conn->container, conn->backup_name, conn->name,
-		 conn->chunk_no);
+		 global->url, global->container, global->backup_name,
+		 conn->name, conn->chunk_no);
 
 	snprintf(content_len, sizeof(content_len), "Content-Length: %lu",
 		(ulong)(conn->chunk_size));
 
 	snprintf(token_header, array_elements(token_header),
-		 "X-Auth-Token: %s", conn->token);
+		 "X-Auth-Token: %s", global->token);
 
 	conn->slist = curl_slist_append(conn->slist, token_header);
 	conn->slist = curl_slist_append(conn->slist,
@@ -1187,6 +1134,11 @@ static void conn_upload_retry(connection_info *conn)
 	/* already closed by cURL */
 	conn->easy = NULL;
 
+	if (conn->slist != NULL) {
+		curl_slist_free_all(conn->slist);
+		conn->slist = NULL;
+	}
+
 	if (conn->retry_count++ > 3) {
 		fprintf(stderr, "error: retry count limit reached\n");
 		exit(EXIT_FAILURE);
@@ -1200,9 +1152,7 @@ static void conn_upload_retry(connection_info *conn)
 	conn_upload_start(conn);
 }
 
-static connection_info *conn_new(const char *url, const char *container,
-				 const char *name, const char *token,
-				 global_io_info *global)
+static connection_info *conn_new(global_io_info *global, ulong global_idx)
 {
 	connection_info *conn;
 
@@ -1211,18 +1161,13 @@ static connection_info *conn_new(const char *url, const char *container,
 		goto error;
 	}
 
-	conn->url = url;
-	conn->container = container;
-	conn->token = token;
-	conn->backup_name = name;
-
 	conn->global = global;
+	conn->global_idx = global_idx;
 	conn->buffer_size = SWIFT_CHUNK_SIZE;
 	if ((conn->buffer = (char *)(calloc(conn->buffer_size, 1))) ==
 	    NULL) {
 		goto error;
 	}
-	conn->filled_size = 0;
 
 	return conn;
 
@@ -1231,8 +1176,7 @@ error:
 		conn_cleanup(conn);
 	}
 
-	fprintf(stderr, "out of memory (%d) objects pending response\n",
-		(int) uploaded_connections.size());
+	fprintf(stderr, "out of memory\n");
 	exit(EXIT_FAILURE);
 
 	return NULL;
@@ -1343,11 +1287,6 @@ static int multi_timer_cb(CURLM *multi, long timeout_ms, global_io_info *global)
 	return 0;
 }
 
-static int cmp_chunks(const void *c1, const void *c2)
-{
-	return ((slo_chunk*)(c1))->idx - ((slo_chunk*)(c2))->idx;
-}
-
 static
 int swift_upload_parts(swift_auth_info *auth, const char *container,
 		       const char *name)
@@ -1362,7 +1301,6 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 
 	memset(&io_global, 0, sizeof(io_global));
 
-	io_global.manifest = slo_manifest_init();
 	io_global.loop = ev_default_loop(0);
 	init_input(&io_global);
 	io_global.multi = curl_multi_init();
@@ -1370,9 +1308,12 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	io_global.timer_event.data = &io_global;
 	io_global.connections = (connection_info **)
 		(calloc(opt_parallel, sizeof(connection_info)));
+	io_global.url = auth->url;
+	io_global.container = container;
+	io_global.backup_name = name;
+	io_global.token = auth->token;
 	for (i = 0; i < opt_parallel; i++) {
-		io_global.connections[i] = conn_new(auth->url, container, name,
-						    auth->token, &io_global);
+		io_global.connections[i] = conn_new(&io_global, i);
 	}
 
 	/* setup the generic multi interface options we want */
@@ -1405,7 +1346,7 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	n_dirty_buffers = 0;
 	for (i = 0; i < opt_parallel; i++) {
 		connection_info *conn = io_global.connections[i];
-		if (conn->upload_size != conn->filled_size) {
+		if (conn && conn->upload_size != conn->filled_size) {
 			fprintf(stderr, "upload failed: %lu bytes left "
 				"in the buffer %s (uploaded = %d)\n",
 				(ulong)(conn->filled_size - conn->upload_size),
@@ -1415,17 +1356,6 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	}
 	if (n_dirty_buffers > 0) {
 		return(EXIT_FAILURE);
-	}
-
-	qsort(io_global.manifest->chunks.buffer,
-	      io_global.manifest->chunks.elements,
-	      sizeof(slo_chunk), cmp_chunks);
-
-	slo_manifest_free(io_global.manifest);
-
-	if (uploaded_connections.size() != 0) {
-		fprintf(stderr, "upload failed %d chunks without confirmation "
-			"of creation\n", (int)(uploaded_connections.size()));
 	}
 
 	return 0;
