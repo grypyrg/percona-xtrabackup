@@ -102,6 +102,7 @@ struct connection_info_struct {
 	char error[CURL_ERROR_SIZE];
 	struct curl_slist *slist;
 	char *name;
+	size_t name_len;
 	char hash[33];
 	size_t chunk_no;
 	bool magic_verified;
@@ -735,6 +736,7 @@ static void check_multi_info(global_io_info *g)
 					  &eff_url);
 			curl_multi_remove_handle(g->multi, easy);
 			curl_easy_cleanup(easy);
+			conn->easy = NULL;
 		}
 	}
 }
@@ -1026,6 +1028,9 @@ static int conn_upload_init(connection_info *conn)
 	conn->payload_size = 0;
 	conn->upload_started = false;
 	conn->retry_count = 0;
+	if (conn->name != NULL) {
+		conn->name[0] = 0;
+	}
 
 	if (conn->easy != NULL) {
 		conn->easy = 0;
@@ -1125,6 +1130,9 @@ static void conn_cleanup(connection_info *conn)
 	if (conn) {
 		free(conn->name);
 		free(conn->buffer);
+		if (conn->easy) {
+			free(conn->easy);
+		}
 	}
 	free(conn);
 }
@@ -1227,7 +1235,14 @@ conn_buffer_updated(connection_info *conn)
 					conn->chunk_path_len +
 					CHUNK_HEADER_CONSTANT_LEN;
 
-		conn->name = (char*)(malloc(conn->chunk_path_len + 1));
+		if (conn->name == NULL) {
+			conn->name = (char*)(malloc(conn->chunk_path_len + 1));
+		} else if (conn->name_len < conn->chunk_path_len + 1) {
+			conn->name = (char*)(realloc(conn->name,
+						conn->chunk_path_len + 1));
+		}
+		conn->name_len = conn->chunk_path_len + 1;
+
 		memcpy(conn->name, conn->buffer + CHUNK_HEADER_CONSTANT_LEN,
 			conn->chunk_path_len);
 		conn->name[conn->chunk_path_len] = 0;
@@ -1245,8 +1260,14 @@ conn_buffer_updated(connection_info *conn)
 	    conn->filled_size >= CHUNK_HEADER_CONSTANT_LEN
 					+ conn->chunk_path_len) {
 
+		if (conn->name == NULL) {
+			conn->name = (char*)(malloc(conn->chunk_path_len + 1));
+		} else if (conn->name_len < conn->chunk_path_len + 1) {
+			conn->name = (char*)(realloc(conn->name,
+						conn->chunk_path_len + 1));
+		}
+		conn->name_len = conn->chunk_path_len + 1;
 
-		conn->name = (char*)(malloc(conn->chunk_path_len + 1));
 		memcpy(conn->name, conn->buffer + CHUNK_HEADER_CONSTANT_LEN,
 			conn->chunk_path_len);
 		conn->name[conn->chunk_path_len] = 0;
@@ -1341,6 +1362,7 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 #endif
 
 	ev_loop(io_global.loop, 0);
+	check_multi_info(&io_global);
 	curl_multi_cleanup(io_global.multi);
 
 	n_dirty_buffers = 0;
@@ -1354,6 +1376,14 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 			++n_dirty_buffers;
 		}
 	}
+
+	for (i = 0; i < opt_parallel; i++) {
+		if (io_global.connections[i] != NULL) {
+			conn_cleanup(io_global.connections[i]);
+		}
+	}
+	free(io_global.connections);
+
 	if (n_dirty_buffers > 0) {
 		return(EXIT_FAILURE);
 	}
@@ -1721,6 +1751,8 @@ swift_parse_container_list(container_list *list)
 		list->final = true;
 	}
 
+	free(tokens);
+
 	return(true);
 }
 
@@ -2045,6 +2077,8 @@ swift_parse_keystone_response_v2(char *response, size_t response_length,
 		}
 	}
 
+	free(tokens);
+
 	strncpy(auth_info->token, token_id, sizeof(auth_info->token));
 
 	assert(level == 0);
@@ -2299,6 +2333,8 @@ swift_parse_keystone_response_v3(char *response, size_t response_length,
 			--level;
 		}
 	}
+
+	free(tokens);
 
 	assert(level == 0);
 
