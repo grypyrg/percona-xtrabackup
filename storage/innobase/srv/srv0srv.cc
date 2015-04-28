@@ -67,6 +67,7 @@ Created 10/8/1995 Heikki Tuuri
 #include "os0sync.h" /* for HAVE_ATOMIC_BUILTINS */
 #include "srv0mon.h"
 #include "ut0crc32.h"
+#include "xb0xb.h"
 
 #include "mysql/plugin.h"
 #include "mysql/service_thd_wait.h"
@@ -2550,6 +2551,10 @@ srv_do_purge(
 
 	ut_a(n_threads > 0);
 	ut_ad(!srv_read_only_mode);
+
+	if (srv_rebuild_indexes) {
+		return(0);
+	}
 
 	/* Purge until there are no more records to purge and there is
 	no change in configuration or server state. If the user has

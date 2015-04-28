@@ -2577,7 +2577,9 @@ files_checked:
 		}
 
 		srv_startup_is_before_trx_rollback_phase = FALSE;
-		recv_recovery_rollback_active();
+		if (!srv_rebuild_indexes) {
+			recv_recovery_rollback_active();
+		}
 
 		/* It is possible that file_format tag has never
 		been set. In this case we initialize it to minimum
@@ -2862,6 +2864,7 @@ files_checked:
 
 	if (srv_rebuild_indexes) {
 		xb_compact_rebuild_indexes();
+		recv_recovery_rollback_active();
 	}
 
 	if (srv_print_verbose_log) {

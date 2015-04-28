@@ -47,6 +47,7 @@ Created 3/26/1996 Heikki Tuuri
 #include "ha_prototypes.h"
 #include "srv0mon.h"
 #include "ut0vec.h"
+#include "xb0xb.h"
 
 #include<set>
 
@@ -419,6 +420,10 @@ trx_resurrect_table_locks(
 	table_id_set		tables;
 
 	ut_ad(undo == trx->insert_undo || undo == trx->update_undo);
+
+	if (srv_rebuild_indexes) {
+		return;
+	}
 
 	if (trx_state_eq(trx, TRX_STATE_COMMITTED_IN_MEMORY)
 	    || undo->empty) {
