@@ -556,12 +556,15 @@ swift_temp_auth(const char *auth_url, swift_auth_info *info)
 	}
 
 cleanup:
-	if (hdr_buf)
+	if (hdr_buf) {
 		free(hdr_buf);
-	if (slist)
+	}
+	if (slist) {
 		curl_slist_free_all(slist);
-	if (curl)
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	if (res == CURLE_OK) {
 		/* check that we received token and storage URL */
@@ -642,10 +645,12 @@ swift_create_container(swift_auth_info *info, const char *name)
 	}
 
 cleanup:
-	if (slist)
+	if (slist) {
 		curl_slist_free_all(slist);
-	if (curl)
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	return res;
 }
@@ -705,10 +710,12 @@ swift_delete_object(swift_auth_info *info, const char *url)
 	}
 
 cleanup:
-	if (slist)
+	if (slist) {
 		curl_slist_free_all(slist);
-	if (curl)
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	return ret;
 }
@@ -1130,8 +1137,13 @@ static void conn_cleanup(connection_info *conn)
 	if (conn) {
 		free(conn->name);
 		free(conn->buffer);
+		if (conn->slist) {
+			curl_slist_free_all(conn->slist);
+			conn->slist = NULL;
+		}
 		if (conn->easy) {
-			free(conn->easy);
+			curl_easy_cleanup(conn->easy);
+			conn->easy = NULL;
 		}
 	}
 	free(conn);
@@ -1543,10 +1555,12 @@ swift_fetch_into_buffer(swift_auth_info *auth, const char *url,
 	}
 
 cleanup:
-	if (slist)
+	if (slist) {
 		curl_slist_free_all(slist);
-	if (curl)
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	if (res == CURLE_OK) {
 		*buf = buffer_info.buf;
@@ -2205,8 +2219,12 @@ swift_keystone_auth_v2(const char *auth_url, swift_auth_info *info)
 	auth_res = true;
 
 cleanup:
-	if (curl)
+	if (slist) {
+		curl_slist_free_all(slist);
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	free(buf_info.buf);
 
@@ -2506,8 +2524,12 @@ swift_keystone_auth_v3(const char *auth_url, swift_auth_info *info)
 	auth_res = true;
 
 cleanup:
-	if (curl)
+	if (slist) {
+		curl_slist_free_all(slist);
+	}
+	if (curl) {
 		curl_easy_cleanup(curl);
+	}
 
 	free(buf_info.buf);
 
