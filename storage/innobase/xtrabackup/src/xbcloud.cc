@@ -1403,25 +1403,6 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	return 0;
 }
 
-
-/*********************************************************************//**
-Callback to parse header of GET request on swift contaier. */
-static
-size_t swift_container_list_header_cb(char *ptr, size_t size, size_t nmemb,
-				      void *data)
-{
-	container_list *list = (container_list*)(data);
-	char object_count_str[100];
-	char *endptr;
-
-	if (get_http_header("X-Container-Object-Count: ", ptr,
-			object_count_str, sizeof(object_count_str))) {
-		list->object_count = strtoull(object_count_str, &endptr, 10);
-	}
-
-	return nmemb * size;
-}
-
 struct download_buffer_info {
 	off_t offset;
 	size_t size;
@@ -1584,6 +1565,16 @@ container_list_new()
 	container_list *list =
 			(container_list *)(calloc(1, sizeof(container_list)));
 
+	list->object_count = 1000;
+	list->objects = (object_info*)
+		(calloc(list->object_count, sizeof(object_info)));
+
+	if (list->objects == NULL) {
+		fprintf(stderr, "error: out of memory\n");
+		free(list);
+		return(NULL);
+	}
+
 	return(list);
 }
 
@@ -1594,6 +1585,29 @@ container_list_free(container_list *list)
 	free(list->content_json);
 	free(list->objects);
 	free(list);
+}
+
+static
+void
+container_list_add_object(container_list *list, const char *name,
+			  const char *hash, size_t bytes)
+{
+	const size_t object_count_step = 1000;
+
+	if (list->idx >= list->object_count) {
+		list->objects = (object_info*)
+			realloc(list->objects,
+				(list->object_count + object_count_step) *
+					sizeof(object_info));
+		memset(list->objects + list->object_count, 0,
+		       object_count_step * sizeof(object_info));
+		list->object_count += object_count_step;
+	}
+	assert(list->idx <= list->object_count);
+	strcpy(list->objects[list->idx].name, name);
+	strcpy(list->objects[list->idx].hash, hash);
+	list->objects[list->idx].bytes = bytes;
+	++list->idx;
 }
 
 
@@ -1690,16 +1704,6 @@ swift_parse_container_list(container_list *list)
 	stack[0].n_items = 1;
 	level = 0;
 
-	if (list->objects == NULL) {
-		list->objects = (object_info*)
-			(calloc(list->object_count, sizeof(object_info)));
-	}
-
-	if (list->objects == NULL) {
-		fprintf(stderr, "error: out of memory\n");
-		return(false);
-	}
-
 	for (size_t i = 0, j = 1; j > 0; i++, j--) {
 		jsmntok_t *t = &tokens[i];
 
@@ -1749,12 +1753,8 @@ swift_parse_container_list(container_list *list)
 			if (stack[level].t->type == JSMN_OBJECT
 			    && level == 2) {
 				char *endptr;
-				assert(list->idx <= list->object_count);
-				strcpy(list->objects[list->idx].name, name);
-				strcpy(list->objects[list->idx].hash, hash);
-				list->objects[list->idx].bytes =
-						strtoull(bytes, &endptr, 10);
-				++list->idx;
+				container_list_add_object(list, name, hash,
+						strtoull(bytes, &endptr, 10));
 				++count;
 			}
 			--level;
@@ -1785,7 +1785,8 @@ swift_list(swift_auth_info *auth, const char *container, const char *path)
 	while (!list->final) {
 
 		/* download the list in json format */
-		snprintf(url, array_elements(url), "%s/%s?format=json%s%s%s%s",
+		snprintf(url, array_elements(url),
+			 "%s/%s?format=json&limit=10%s%s%s%s",
 			 auth->url, container, path ? "&prefix=" : "",
 			 path ? path : "", list->idx > 0 ? "&marker=" : "",
 			 list->idx > 0 ?
@@ -1793,8 +1794,7 @@ swift_list(swift_auth_info *auth, const char *container, const char *path)
 
 		list->content_json = swift_fetch_into_buffer(auth, url,
 				&list->content_json, &list->content_bufsize,
-				&list->content_length,
-				swift_container_list_header_cb, list);
+				&list->content_length, NULL, NULL);
 
 		if (list->content_json == NULL) {
 			container_list_free(list);
@@ -1924,6 +1924,7 @@ bool swift_delete(swift_auth_info *auth, const char *container,
 			snprintf(url, sizeof(url), "%s/%s/%s",
 				 auth->url, container, chunk_name);
 
+			fprintf(stderr, "delete %s\n", chunk_name);
 			if (!swift_delete_object(auth, url)) {
 				fprintf(stderr, "error: failed to delete "
 						"chunk %s\n", chunk_name);
