@@ -49,6 +49,12 @@ using std::string;
 
 #define SWIFT_CHUNK_SIZE 11 * 1024 * 1024
 
+#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#define OLD_CURL_MULTI 0
+#else
+#define OLD_CURL_MULTI 1
+#endif
+
 /*****************************************************************************/
 
 typedef struct swift_auth_info_struct swift_auth_info;
@@ -724,7 +730,9 @@ static int conn_upload_init(connection_info *conn);
 static void conn_buffer_updated(connection_info *conn);
 static connection_info *conn_new(global_io_info *global, ulong global_idx);
 static void conn_cleanup(connection_info *conn);
+#if !(OLD_CURL_MULTI)
 static void conn_upload_retry(connection_info *conn);
+#endif
 
 /* Check for completed transfers, and remove their easy handles */
 static void check_multi_info(global_io_info *g)
@@ -796,7 +804,7 @@ static void event_cb(EV_P_ struct ev_io *w, int revents)
 	global_io_info *global = (global_io_info*)(w->data);
 	CURLMcode rc;
 
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#if !(OLD_CURL_MULTI)
 	int action = (revents & EV_READ  ? CURL_POLL_IN  : 0) |
 		(revents & EV_WRITE ? CURL_POLL_OUT : 0);
 
@@ -820,10 +828,10 @@ static void event_cb(EV_P_ struct ev_io *w, int revents)
 static void remsock(curl_socket_t s, socket_info *fdp, global_io_info *global)
 {
 	if (fdp) {
-		if (fdp->evset)
+		if (fdp->evset) {
 			ev_io_stop(global->loop, &fdp->ev);
+		}
 		free(fdp);
-		curl_multi_assign(global->multi, s, NULL);
 	}
 }
 
@@ -861,6 +869,7 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 	socket_info *fdp = (socket_info*)(sockp);
 
 	if (what == CURL_POLL_REMOVE) {
+#if !(OLD_CURL_MULTI)
 		connection_info *conn;
 		uint i;
 
@@ -877,6 +886,7 @@ static int sock_cb(CURL *easy, curl_socket_t s, int what, void *cbp,
 				conn_upload_retry(conn);
 			}
 		}
+#endif
 
 		remsock(s, fdp, global);
 	} else {
@@ -895,7 +905,7 @@ static void timer_cb(EV_P_ struct ev_timer *w, int revents)
 	global_io_info *io_global = (global_io_info*)(w->data);
 	CURLMcode rc;
 
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#if !(OLD_CURL_MULTI)
 	do {
 		rc = curl_multi_socket_action(io_global->multi,
 					      CURL_SOCKET_TIMEOUT, 0,
@@ -1071,8 +1081,10 @@ static int conn_upload_start(connection_info *conn)
 
 	global = conn->global;
 
-	fprintf(stderr, "uploading chunk %zu of '%s' with MD5 %s\n",
-		conn->chunk_no, conn->name, conn->hash);
+	fprintf(stderr, "uploading chunk %s/%s/%s.%020zu "
+			"(md5: %s, size: %zu)\n",
+			global->container, global->backup_name, conn->name,
+			conn->chunk_no, conn->hash, conn->chunk_size);
 
 	snprintf(object_url, array_elements(object_url), "%s/%s/%s/%s.%020zu",
 		 global->url, global->container, global->backup_name,
@@ -1120,7 +1132,7 @@ static int conn_upload_start(connection_info *conn)
 	rc = curl_multi_add_handle(conn->global->multi, conn->easy);
 	mcode_or_die("conn_upload_init: curl_multi_add_handle", rc);
 
-#if !((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#if (OLD_CURL_MULTI)
 	do {
 		rc = curl_multi_socket_all(conn->global->multi,
 					   &conn->global->still_running);
@@ -1149,6 +1161,7 @@ static void conn_cleanup(connection_info *conn)
 	free(conn);
 }
 
+#if !(OLD_CURL_MULTI)
 static void conn_upload_retry(connection_info *conn)
 {
 	/* already closed by cURL */
@@ -1171,6 +1184,7 @@ static void conn_upload_retry(connection_info *conn)
 
 	conn_upload_start(conn);
 }
+#endif
 
 static connection_info *conn_new(global_io_info *global, ulong global_idx)
 {
@@ -1326,7 +1340,7 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 {
 	global_io_info io_global;
 	ulong i;
-#if !((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#if (OLD_CURL_MULTI)
 	long timeout;
 #endif
 	CURLMcode rc;
@@ -1352,22 +1366,19 @@ int swift_upload_parts(swift_auth_info *auth, const char *container,
 	/* setup the generic multi interface options we want */
 	curl_multi_setopt(io_global.multi, CURLMOPT_SOCKETFUNCTION, sock_cb);
 	curl_multi_setopt(io_global.multi, CURLMOPT_SOCKETDATA, &io_global);
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
+#if !(OLD_CURL_MULTI)
 	curl_multi_setopt(io_global.multi, CURLMOPT_TIMERFUNCTION, multi_timer_cb);
 	curl_multi_setopt(io_global.multi, CURLMOPT_TIMERDATA, &io_global);
-#else
-	curl_multi_timeout(io_global.multi, &timeout);
-	if (timeout >= 0)
-		multi_timer_cb(io_global.multi, timeout, &io_global);
-#endif
-
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 16))
 	do {
 		rc = curl_multi_socket_action(io_global.multi,
 					      CURL_SOCKET_TIMEOUT, 0,
 					      &io_global.still_running);
 	} while (rc == CURLM_CALL_MULTI_PERFORM);
 #else
+	curl_multi_timeout(io_global.multi, &timeout);
+	if (timeout >= 0) {
+		multi_timer_cb(io_global.multi, timeout, &io_global);
+	}
 	do {
 		rc = curl_multi_socket_all(io_global.multi, &io_global.still_running);
 	} while(rc == CURLM_CALL_MULTI_PERFORM);
